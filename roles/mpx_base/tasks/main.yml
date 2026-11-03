@@ -67,3 +67,25 @@
     validate_certs: "{{ mpx_validate_certs }}"
   when: mpx_gui_https_only | default(true) | bool
   no_log: true
+
+- name: Lockout guard - confirmations required before disabling local auth
+  ansible.builtin.assert:
+    that:
+      - nsroot_console_verified | default(false) | bool
+      - ldap_admin_login_verified | default(false) | bool
+    fail_msg: >-
+      disable_local_auth is true, but disabling local auth could lock you out. Confirm nsroot logs in
+      from the console (nsroot_console_verified: true) and an LDAP admin logs in (ldap_admin_login_verified: true).
+  when: disable_local_auth | bool
+
+- name: Disable local auth (only after LDAP admin login works)
+  netscaler.adc.systemparameter:
+    nsip: "{{ ansible_host }}"
+    nitro_user: "{{ mpx_nitro_user }}"
+    nitro_pass: "{{ mpx_nitro_pass }}"
+    nitro_protocol: https
+    validate_certs: "{{ mpx_validate_certs }}"
+    state: present
+    localauth: disabled
+  when: disable_local_auth | bool
+  no_log: true

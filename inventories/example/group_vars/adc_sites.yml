@@ -22,7 +22,7 @@ mpx_nitro_login_retries: 30
 
 # FIPS - ONLY used when a site has fips_required: true (current boxes are NOT FIPS). There is NO HSM on this model; see NOTES-unverified.md.
 fips_hardening: true              # FIPS sites only: strong passwords
-fips_disable_local_auth: false    # only after LDAP admin login is tested (docs step 4)
+disable_local_auth: false    # only after LDAP admin login is tested (docs step 4)
 # Operator confirmations, both required before local auth can be disabled:
 nsroot_console_verified: false     # set true only after nsroot login works from the serial/LOM console
 ldap_admin_login_verified: false   # set true only after an LDAP admin account logs in (GUI + SSH)

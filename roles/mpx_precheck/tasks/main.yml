@@ -65,9 +65,9 @@
       - nsroot_console_verified | default(false) | bool
       - ldap_admin_login_verified | default(false) | bool
     fail_msg: >-
-      fips_disable_local_auth is true, but disabling local auth could lock you out. Confirm nsroot logs in
+      disable_local_auth is true, but disabling local auth could lock you out. Confirm nsroot logs in
       from the console (nsroot_console_verified: true) and an LDAP admin logs in (ldap_admin_login_verified: true).
-  when: fips_disable_local_auth | default(false) | bool
+  when: disable_local_auth | default(false) | bool
 
 - name: FIPS MPX LAS entitlement looks right (FIPS sites only; must exactly match the LAS account)
   ansible.builtin.assert:

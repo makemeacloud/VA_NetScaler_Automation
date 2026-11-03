@@ -68,13 +68,13 @@ or, if unset, the first host name of the pair in sort order. Saves run on every 
 - It must run the separate 14.1-FIPS firmware. Check: `show system fipsStatus` says "operating in FIPS mode".
 - HA works the same as non-FIPS. No FIPS key sync between nodes.
 - Setting `fips_hsm_init_confirm: ERASE-FIPS-HSM` on an MPX 9200 FIPS makes precheck fail on purpose.
-- Local auth is turned off only when you set `fips_disable_local_auth: true` (after LDAP works).
+- Local auth is turned off only when you set `disable_local_auth: true` (after LDAP works).
 
-### Turning off local login (FIPS boxes only; skip on Cleveland and Martinsburg, which are not FIPS)
-1. Run `mpx.yml --limit site_cle` with `fips_disable_local_auth: false`.
+### Turning off local login (all boxes, after LDAP works)
+1. Run `mpx.yml --limit site_cle` with `disable_local_auth: false`.
 2. Log in as nsroot from the serial/LOM console on both nodes. Then set `nsroot_console_verified: true`.
 3. Set up LDAP; log in as an LDAP admin by GUI and SSH on both nodes. Then set `ldap_admin_login_verified: true`.
-4. Set `fips_disable_local_auth: true` and run `--tags precheck,fips`. Without both confirmations, it stops.
+4. Set `disable_local_auth: true` and run `--tags precheck,base`. Without both confirmations, it stops.
 5. Check LDAP admin login again, and nsroot from console, before moving on.
 
 ## Discovery and mapping tool (read-only)
