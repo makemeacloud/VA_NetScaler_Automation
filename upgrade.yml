@@ -123,7 +123,7 @@
   roles: [upgrade_node]
   post_tasks:
     - name: Peer UP and in sync before fail-back
-      when: upgrade_failback | bool and upgrade_node_installed | bool and upgrade_mode == 'normal'
+      when: upgrade_failback | bool and upgrade_node_installed | bool
       ansible.builtin.uri:
         url: "https://{{ ansible_host }}/nitro/v1/config/hanode"
         headers: {X-NITRO-USER: "{{ mpx_nitro_user }}", X-NITRO-PASS: "{{ mpx_nitro_pass }}"}

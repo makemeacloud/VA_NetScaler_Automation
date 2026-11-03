@@ -70,7 +70,7 @@ or, if unset, the first host name of the pair in sort order. Saves run on every 
 - Setting `fips_hsm_init_confirm: ERASE-FIPS-HSM` on an MPX 9200 FIPS makes precheck fail on purpose.
 - Local auth is turned off only when you set `fips_disable_local_auth: true` (after LDAP works).
 
-### Cleveland Lab test steps (local auth off)
+### Turning off local login (FIPS boxes only; skip on Cleveland and Martinsburg, which are not FIPS)
 1. Run `mpx.yml --limit site_cle` with `fips_disable_local_auth: false`.
 2. Log in as nsroot from the serial/LOM console on both nodes. Then set `nsroot_console_verified: true`.
 3. Set up LDAP; log in as an LDAP admin by GUI and SSH on both nodes. Then set `ldap_admin_login_verified: true`.
