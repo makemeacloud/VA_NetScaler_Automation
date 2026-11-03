@@ -1,9 +1,59 @@
 ---
-# Official netscaler.adc collection against each VPX NSIP.
-# Order: RPC password on both nodes -> add HA peer (with INC) on both nodes.
-- name: Set RPC node password for self and peer on every HA node
+# Official netscaler.adc collection against each VPX NSIP. No config loss on pairing:
+# the FIRST node of each ha_pair in vpx_instances is the intended primary (override with ha_primary: true).
+# Order (tasks run in lock-step across both SDX hosts):
+#   lock primary STAYPRIMARY / secondary STAYSECONDARY -> RPC passwords -> save -> primary adds peer ->
+#   secondary adds peer -> wait until secondary is Secondary -> release locks (ENABLED).
+# Nodes already paired with their peer are skipped (safe to re-run).
+- name: Work out each local node's peer and intended role
   vars:
-    pair_nodes: "{{ vpx_instances | selectattr('ha_pair', 'equalto', item.0.ha_pair) | list }}"
+    mine: "{{ vpx_instances | selectattr('sdx_host', 'equalto', inventory_hostname) | selectattr('ha_pair', 'defined') | list }}"
+  ansible.builtin.set_fact:
+    vpx_ha_pair_nodes: >-
+      {% set out = [] %}{% for n in mine %}{% set pair = vpx_instances | selectattr('ha_pair', 'equalto', n.ha_pair) | list %}
+      {% set flagged = pair | selectattr('ha_primary', 'defined') | selectattr('ha_primary') | list %}
+      {% set prim = (flagged | first).name if flagged | length == 1 else (pair | first).name %}
+      {% set peer = pair | rejectattr('name', 'equalto', n.name) | first %}
+      {% set _ = out.append(n | combine({'peer_nsip': peer.nsip, 'is_primary': n.name == prim})) %}{% endfor %}{{ out }}
+
+- name: Read HA state (read-only)
+  ansible.builtin.uri:
+    url: "https://{{ item.nsip }}/nitro/v1/config/hanode"
+    headers: {X-NITRO-USER: "{{ admin_profile_user }}", X-NITRO-PASS: "{{ admin_profile_password }}"}
+    validate_certs: "{{ nitro_validate_certs }}"
+  loop: "{{ vpx_ha_pair_nodes }}"
+  loop_control: {label: "{{ item.name }}"}
+  register: vpx_ha_pair_before
+  check_mode: false
+  delegate_to: localhost
+  no_log: true
+
+- name: Nodes already paired with their peer
+  ansible.builtin.set_fact:
+    vpx_ha_pair_paired: >-
+      {% set p = [] %}{% for r in vpx_ha_pair_before.results %}{% if r.item.peer_nsip in (r.json.hanode | default([])
+      | map(attribute='ipaddress') | list) %}{% set _ = p.append(r.item.name) %}{% endif %}{% endfor %}{{ p }}
+
+- name: Unpaired nodes to work on
+  ansible.builtin.set_fact:
+    vpx_ha_pair_todo: "{{ vpx_ha_pair_nodes | rejectattr('name', 'in', vpx_ha_pair_paired) | list }}"
+
+- name: Lock roles before any peer is added (primary STAYPRIMARY, secondary STAYSECONDARY)
+  netscaler.adc.hanode:
+    nsip: "{{ item.nsip }}"
+    nitro_user: "{{ admin_profile_user }}"
+    nitro_pass: "{{ admin_profile_password }}"
+    nitro_protocol: https
+    validate_certs: "{{ nitro_validate_certs }}"
+    state: present
+    id: 0
+    hastatus: "{{ 'STAYPRIMARY' if item.is_primary else 'STAYSECONDARY' }}"
+  loop: "{{ vpx_ha_pair_todo }}"
+  loop_control: {label: "{{ item.name }}"}
+  delegate_to: localhost
+  no_log: true
+
+- name: Set RPC node password for self and peer
   netscaler.adc.nsrpcnode:
     nsip: "{{ item.0.nsip }}"
     nitro_user: "{{ admin_profile_user }}"
@@ -11,17 +61,27 @@
     nitro_protocol: https
     validate_certs: "{{ nitro_validate_certs }}"
     state: present
-    ipaddress: "{{ pair_nodes[item.1].nsip }}"
+    ipaddress: "{{ item.0.nsip if item.1 == 0 else item.0.peer_nsip }}"
     password: "{{ rpc_node_password }}"
     secure: "YES"
-  loop: "{{ vpx_instances | selectattr('sdx_host', 'equalto', inventory_hostname) | selectattr('ha_pair', 'defined') | product([0, 1]) | list }}"
+  loop: "{{ vpx_ha_pair_todo | product([0, 1]) | list }}"
   loop_control: {label: "{{ item.0.name }} rpc #{{ item.1 }}"}
   delegate_to: localhost
   no_log: true
 
-- name: Add HA peer on each node (id = ha_peer_id, INC from ha_inc_mode)
-  vars:
-    peer: "{{ vpx_instances | selectattr('ha_pair', 'equalto', item.ha_pair) | rejectattr('name', 'equalto', item.name) | first }}"
+- name: Save before pairing
+  netscaler.adc.save_config:
+    nsip: "{{ item.nsip }}"
+    nitro_user: "{{ admin_profile_user }}"
+    nitro_pass: "{{ admin_profile_password }}"
+    nitro_protocol: https
+    validate_certs: "{{ nitro_validate_certs }}"
+  loop: "{{ vpx_ha_pair_todo }}"
+  loop_control: {label: "{{ item.name }}"}
+  delegate_to: localhost
+  no_log: true
+
+- name: PRIMARY nodes add their peer first
   netscaler.adc.hanode:
     nsip: "{{ item.nsip }}"
     nitro_user: "{{ admin_profile_user }}"
@@ -30,9 +90,57 @@
     validate_certs: "{{ nitro_validate_certs }}"
     state: present
     id: "{{ item.ha_peer_id | int }}"
-    ipaddress: "{{ peer.nsip }}"
+    ipaddress: "{{ item.peer_nsip }}"
     inc: "{{ 'ENABLED' if ha_inc_mode | bool else 'DISABLED' }}"
-  loop: "{{ vpx_instances | selectattr('sdx_host', 'equalto', inventory_hostname) | selectattr('ha_pair', 'defined') | list }}"
+  loop: "{{ vpx_ha_pair_todo | selectattr('is_primary') | list }}"
+  loop_control: {label: "{{ item.name }}"}
+  delegate_to: localhost
+  no_log: true
+
+- name: SECONDARY nodes add their peer
+  netscaler.adc.hanode:
+    nsip: "{{ item.nsip }}"
+    nitro_user: "{{ admin_profile_user }}"
+    nitro_pass: "{{ admin_profile_password }}"
+    nitro_protocol: https
+    validate_certs: "{{ nitro_validate_certs }}"
+    state: present
+    id: "{{ item.ha_peer_id | int }}"
+    ipaddress: "{{ item.peer_nsip }}"
+    inc: "{{ 'ENABLED' if ha_inc_mode | bool else 'DISABLED' }}"
+  loop: "{{ vpx_ha_pair_todo | rejectattr('is_primary') | list }}"
+  loop_control: {label: "{{ item.name }}"}
+  delegate_to: localhost
+  no_log: true
+
+- name: Wait until each secondary sees its peer and is Secondary
+  ansible.builtin.uri:
+    url: "https://{{ item.nsip }}/nitro/v1/config/hanode"
+    headers: {X-NITRO-USER: "{{ admin_profile_user }}", X-NITRO-PASS: "{{ admin_profile_password }}"}
+    validate_certs: "{{ nitro_validate_certs }}"
+  register: vpx_ha_pair_sec
+  until: >-
+    (vpx_ha_pair_sec.json.hanode | default([]) | length) >= 2 and
+    ((vpx_ha_pair_sec.json.hanode | selectattr('id', 'in', ['0', 0]) | first).state | default('') | lower) == 'secondary'
+  retries: 20
+  delay: 15
+  loop: "{{ vpx_ha_pair_todo | rejectattr('is_primary') | list }}"
+  loop_control: {label: "{{ item.name }}"}
+  when: not ansible_check_mode
+  delegate_to: localhost
+  no_log: true
+
+- name: Release the locks (hastatus ENABLED)
+  netscaler.adc.hanode:
+    nsip: "{{ item.nsip }}"
+    nitro_user: "{{ admin_profile_user }}"
+    nitro_pass: "{{ admin_profile_password }}"
+    nitro_protocol: https
+    validate_certs: "{{ nitro_validate_certs }}"
+    state: present
+    id: 0
+    hastatus: ENABLED
+  loop: "{{ vpx_ha_pair_todo }}"
   loop_control: {label: "{{ item.name }}"}
   delegate_to: localhost
   no_log: true

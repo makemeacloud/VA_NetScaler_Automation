@@ -25,6 +25,27 @@
   when: upgrade_node_installed | bool
   delegate_to: localhost
   block:
+    - name: SAVE config before install (install reboots; unsaved config would be lost)
+      netscaler.adc.save_config:
+        nsip: "{{ ansible_host }}"
+        nitro_user: "{{ mpx_nitro_user }}"
+        nitro_pass: "{{ mpx_nitro_pass }}"
+        nitro_protocol: https
+        validate_certs: "{{ mpx_validate_certs }}"
+      no_log: true
+
+    - name: Full system backup on the box before install (copy it off the box with WinSCP afterwards)
+      ansible.builtin.uri:
+        url: "https://{{ ansible_host }}/nitro/v1/config/systembackup?action=create"
+        method: POST
+        headers: {X-NITRO-USER: "{{ mpx_nitro_user }}", X-NITRO-PASS: "{{ mpx_nitro_pass }}"}
+        body_format: json
+        body: {systembackup: {filename: "pre_upgrade_{{ inventory_hostname }}", level: full}}
+        status_code: [200, 201]
+        validate_certs: "{{ mpx_validate_certs }}"
+      when: upgrade_backup | default(true) | bool
+      no_log: true
+
     - name: Install build (box reboots; ISSU keeps sessions via migration)
       netscaler.adc.install:
         nsip: "{{ ansible_host }}"
@@ -69,7 +90,7 @@
       ansible.builtin.assert:
         that:
           - fw_version_check_ok | bool
-          - not (fips_required | bool) or ('fips' in fw_version_check_version | lower)
+          - not (fips_required | bool) or ('fips' in fw_version_check_version | lower)   # FIPS sites only
         fail_msg: "{{ inventory_hostname }} now runs '{{ fw_version_check_version }}', expected {{ upgrade_target_version }}."
 
 - name: ISSU - start migration on the upgraded secondary and wait

@@ -18,7 +18,7 @@ NOT verified – confirm on target MS build:
 
 - Run `scripts/sdx_nitro.py --discover <lab-sdx>` (read-only) to confirm the ns / network_interfaces field names above.
 
-## MPX track / FIPS (checked against docs.netscaler.com, pages last published Sep 30, 2026)
+## MPX track / FIPS — only relevant when fips_required is true; Cleveland/Martinsburg are non-FIPS (checked against docs.netscaler.com, pages last published Sep 30, 2026)
 Verified from docs:
 - MPX 8900/9100/9200 FIPS: FIPS 140-3 Level 2, 14.1-FIPS firmware only, no third-party HSM (MPX FIPS appliances page, FIPS FAQ).
 - MPX 14000 FIPS commands (reset fips, set fips -initHSM, show fips, SIM key sharing) do NOT work on 8900/9100/9200 (FAQ; CTX330685).
@@ -99,3 +99,11 @@ UNVERIFIED (nothing run on a device):
   secondary, polled until migrationstatus == "Migration is completed" (string from upstream).
 - nsversion string parse "NSR.r: Build B.b" assumed for FIPS builds too.
 - Upstream repo has no LICENSE file.
+
+## Added 2026-11-03 (not verified on hardware)
+- nslicense fields `isstandardlic` / `isenterpriselic` / `isplatinumlic` used by las_apply to skip re-licensing.
+- hanode `hasync` value used as the sync gate in upgrade.yml (accepts SUCCESS or ENABLED).
+- `systembackup?action=create` body (filename, level full) in upgrade_node.
+- PUT /nitro/v1/config/nsip with only {ipaddress, gui: SECUREONLY} for HTTPS-only GUI.
+- SDX `config/ns` listing used by vpx_provision to skip existing VPX names.
+- STAYPRIMARY/STAYSECONDARY lock + release order during pairing (doc-backed, not lab-tested).

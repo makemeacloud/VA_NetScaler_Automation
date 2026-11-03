@@ -9,6 +9,7 @@
       X-NITRO-PASS: "{{ fw_version_check_pass }}"
     validate_certs: "{{ fw_version_check_validate }}"
   register: fw_version_check_raw
+  check_mode: false
   delegate_to: localhost
   no_log: true
 

@@ -1,0 +1,17 @@
+{
+  "files.associations": {
+    "mpx.yml": "ansible",
+    "site.yml": "ansible",
+    "upgrade.yml": "ansible",
+    "precheck.yml": "ansible",
+    "**/roles/**/tasks/*.yml": "ansible",
+    "**/inventories/**/*.yml": "yaml",
+    "**/group_vars/*.yml": "yaml"
+  },
+  "ansible.python.interpreterPath": "~/nsenv/bin/python",
+  "ansible.validation.lint.enabled": false,
+  "yaml.customTags": ["!vault scalar"],
+  "terminal.integrated.defaultProfile.windows": "Ubuntu (WSL)",
+  "terminal.integrated.defaultProfile.linux": "bash",
+  "files.exclude": { "**/__pycache__": true }
+}

@@ -14,3 +14,4 @@ las_apply_cc_endpoint: "https://trust.citrixworkspacesapi.net/root/tokens/client
 las_apply_blob_dir: "{{ playbook_dir }}/.las_blobs"
 las_apply_wait_timeout_s: 900
 las_apply_login_retries: 45
+las_apply_force: false             # true = re-apply LAS even if an edition is already licensed (reboots)

@@ -4,7 +4,9 @@
 # Secrets: put them in an ansible-vault file, never in plain text.
 
 nitro_protocol: https
-nitro_validate_certs: true
+# New boxes ship with a self-signed cert, so first contact must not verify it.
+# Set true once a CA-signed management cert is installed (recommended for production).
+nitro_validate_certs: false
 
 # Per-SDX Management Service login (vault these)
 sdx_ms_user: "CHANGE_ME"

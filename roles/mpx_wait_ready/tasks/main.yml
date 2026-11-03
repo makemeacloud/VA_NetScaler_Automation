@@ -31,6 +31,7 @@
       X-NITRO-PASS: "{{ mpx_nitro_pass }}"
     validate_certs: "{{ mpx_validate_certs }}"
   register: mpx_wait_ready_version
+  check_mode: false
   no_log: true
 
 - name: Firmware is on the approved list (FIPS image on FIPS models)

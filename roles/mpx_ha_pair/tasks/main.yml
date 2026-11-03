@@ -1,33 +1,121 @@
 ---
-- name: Set RPC node password for self and peer
-  netscaler.adc.nsrpcnode:
-    nsip: "{{ ansible_host }}"
-    nitro_user: "{{ mpx_nitro_user }}"
-    nitro_pass: "{{ mpx_nitro_pass }}"
-    nitro_protocol: https
+# HA pairing without config loss.
+# When two standalone boxes are paired, whichever becomes PRIMARY pushes its whole config to the other
+# (full sync) and the other box's running config is REPLACED. The old role added the peer on both boxes
+# at the same time with no preference, so either box could win the election.
+# Now: the intended secondary (mpx_is_primary false) is locked to STAYSECONDARY BEFORE any peer is added,
+# the primary is locked STAYPRIMARY, the primary adds its peer first, then the secondary. The lock is released only after the secondary
+# shows the primary and sync. Already-paired boxes (peer present) are left alone - safe to re-run.
+- name: Read HA state before pairing (read-only)
+  ansible.builtin.uri:
+    url: "https://{{ ansible_host }}/nitro/v1/config/hanode"
+    headers: {X-NITRO-USER: "{{ mpx_nitro_user }}", X-NITRO-PASS: "{{ mpx_nitro_pass }}"}
     validate_certs: "{{ mpx_validate_certs }}"
-    state: present
-    ipaddress: "{{ item }}"
-    password: "{{ rpc_node_password }}"
-    secure: "YES"
-  loop: ["{{ ansible_host }}", "{{ hostvars[ha_peer].ansible_host }}"]
+  register: mpx_ha_pair_before
+  check_mode: false
   no_log: true
 
-- name: Add HA peer (id = ha_peer_id, INC from ha_inc_mode)
-  netscaler.adc.hanode:
-    nsip: "{{ ansible_host }}"
-    nitro_user: "{{ mpx_nitro_user }}"
-    nitro_pass: "{{ mpx_nitro_pass }}"
-    nitro_protocol: https
-    validate_certs: "{{ mpx_validate_certs }}"
-    state: present
-    id: "{{ ha_peer_id | int }}"
-    ipaddress: "{{ hostvars[ha_peer].ansible_host }}"
-    inc: "{{ 'ENABLED' if ha_inc_mode | bool else 'DISABLED' }}"
-  no_log: true
+- name: Already paired with the right peer?
+  ansible.builtin.set_fact:
+    mpx_ha_pair_already: "{{ hostvars[ha_peer].ansible_host in (mpx_ha_pair_before.json.hanode | default([]) | map(attribute='ipaddress') | list) }}"
+    mpx_ha_pair_other_peer: "{{ mpx_ha_pair_before.json.hanode | default([]) | rejectattr('id', 'in', ['0', 0])
+                           | rejectattr('ipaddress', 'equalto', hostvars[ha_peer].ansible_host) | list | length > 0 }}"
 
-# Adopted from netscaler/automation-toolkit events/20230206/step1_configure_ha: CLI prompt shows user@HA-state,
-# so an operator always sees which node is primary before typing a command.
+- name: Refuse if this box is paired with some OTHER node
+  ansible.builtin.assert:
+    that: not (mpx_ha_pair_other_peer | bool)
+    fail_msg: "{{ inventory_hostname }} already has an HA peer that is not {{ ha_peer }}. Fix by hand; nothing changed."
+
+- name: Exactly one intended primary per pair
+  ansible.builtin.assert:
+    that: (mpx_is_primary | bool) != (hostvars[ha_peer].mpx_is_primary | bool)
+    fail_msg: "{{ site_name }}: set ha_primary true on exactly one node of the pair (or leave it unset on both)."
+
+- name: Pair (only when not paired yet)
+  when: not (mpx_ha_pair_already | bool)
+  block:
+    - name: Lock roles before any peer is added (primary STAYPRIMARY, secondary STAYSECONDARY)
+      netscaler.adc.hanode:
+        nsip: "{{ ansible_host }}"
+        nitro_user: "{{ mpx_nitro_user }}"
+        nitro_pass: "{{ mpx_nitro_pass }}"
+        nitro_protocol: https
+        validate_certs: "{{ mpx_validate_certs }}"
+        state: present
+        id: 0
+        hastatus: "{{ 'STAYPRIMARY' if mpx_is_primary | bool else 'STAYSECONDARY' }}"
+      no_log: true
+
+    - name: Set RPC node password for self and peer
+      netscaler.adc.nsrpcnode:
+        nsip: "{{ ansible_host }}"
+        nitro_user: "{{ mpx_nitro_user }}"
+        nitro_pass: "{{ mpx_nitro_pass }}"
+        nitro_protocol: https
+        validate_certs: "{{ mpx_validate_certs }}"
+        state: present
+        ipaddress: "{{ item }}"
+        password: "{{ rpc_node_password }}"
+        secure: "YES"
+      loop: ["{{ ansible_host }}", "{{ hostvars[ha_peer].ansible_host }}"]
+      no_log: true
+
+    - name: Save before pairing (the standalone config is on disk if anything goes wrong)
+      netscaler.adc.save_config:
+        nsip: "{{ ansible_host }}"
+        nitro_user: "{{ mpx_nitro_user }}"
+        nitro_pass: "{{ mpx_nitro_pass }}"
+        nitro_protocol: https
+        validate_certs: "{{ mpx_validate_certs }}"
+      no_log: true
+
+    - name: PRIMARY adds its peer first
+      netscaler.adc.hanode: &add_peer
+        nsip: "{{ ansible_host }}"
+        nitro_user: "{{ mpx_nitro_user }}"
+        nitro_pass: "{{ mpx_nitro_pass }}"
+        nitro_protocol: https
+        validate_certs: "{{ mpx_validate_certs }}"
+        state: present
+        id: "{{ ha_peer_id | int }}"
+        ipaddress: "{{ hostvars[ha_peer].ansible_host }}"
+        inc: "{{ 'ENABLED' if ha_inc_mode | bool else 'DISABLED' }}"
+      when: mpx_is_primary | bool
+      no_log: true
+
+    - name: SECONDARY adds its peer (runs after the primary task finished on all hosts)
+      netscaler.adc.hanode: *add_peer
+      when: not (mpx_is_primary | bool)
+      no_log: true
+
+    - name: Secondary sees the primary and is Secondary (read-only)
+      ansible.builtin.uri:
+        url: "https://{{ ansible_host }}/nitro/v1/config/hanode"
+        headers: {X-NITRO-USER: "{{ mpx_nitro_user }}", X-NITRO-PASS: "{{ mpx_nitro_pass }}"}
+        validate_certs: "{{ mpx_validate_certs }}"
+      register: mpx_ha_pair_sec
+      until: >-
+        (mpx_ha_pair_sec.json.hanode | default([]) | length) >= 2 and
+        ((mpx_ha_pair_sec.json.hanode | selectattr('id', 'in', ['0', 0]) | first).state | default('') | lower) == 'secondary'
+      retries: 20
+      delay: 15
+      when: not (mpx_is_primary | bool) and not ansible_check_mode
+      no_log: true
+
+    - name: Release the locks on both nodes (hastatus ENABLED) - normal failover works again
+      netscaler.adc.hanode:
+        nsip: "{{ ansible_host }}"
+        nitro_user: "{{ mpx_nitro_user }}"
+        nitro_pass: "{{ mpx_nitro_pass }}"
+        nitro_protocol: https
+        validate_certs: "{{ mpx_validate_certs }}"
+        state: present
+        id: 0
+        hastatus: ENABLED
+      when: mpx_ha_release_lock | default(true) | bool
+      no_log: true
+
+# Adopted from netscaler/automation-toolkit events/20230206/step1_configure_ha: CLI prompt shows user@HA-state.
 - name: Set CLI prompt to user@HA-state (%u@%s)
   netscaler.adc.systemparameter:
     nsip: "{{ ansible_host }}"
@@ -37,15 +125,20 @@
     validate_certs: "{{ mpx_validate_certs }}"
     state: present
     promptstring: "{{ mpx_promptstring | default('%u@%s') }}"
+  when: mpx_is_primary | bool   # synced to the secondary
   no_log: true
 
-- name: Verify the peer shows up in HA (read-only)
+- name: Verify the pair (read-only) - one Primary, peer UP
   ansible.builtin.uri:
     url: "https://{{ ansible_host }}/nitro/v1/config/hanode"
     headers: {X-NITRO-USER: "{{ mpx_nitro_user }}", X-NITRO-PASS: "{{ mpx_nitro_pass }}"}
     validate_certs: "{{ mpx_validate_certs }}"
   register: mpx_ha_pair_state
-  until: (mpx_ha_pair_state.json.hanode | default([]) | length) >= 2
+  until: >-
+    (mpx_ha_pair_state.json.hanode | default([]) | length) >= 2 and
+    ((mpx_ha_pair_state.json.hanode | rejectattr('id', 'in', ['0', 0]) | first).state | default('') | upper) in ['PRIMARY', 'SECONDARY']
   retries: 10
   delay: 15
+  when: not ansible_check_mode
+  check_mode: false
   no_log: true

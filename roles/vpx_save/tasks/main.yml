@@ -1,0 +1,12 @@
+---
+- name: Save config on every VPX of this SDX
+  netscaler.adc.save_config:
+    nsip: "{{ item.nsip }}"
+    nitro_user: "{{ admin_profile_user }}"
+    nitro_pass: "{{ admin_profile_password }}"
+    nitro_protocol: https
+    validate_certs: "{{ nitro_validate_certs }}"
+  loop: "{{ vpx_instances | selectattr('sdx_host', 'equalto', inventory_hostname) | list }}"
+  loop_control: {label: "{{ item.name }}"}
+  delegate_to: localhost
+  no_log: true

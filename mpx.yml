@@ -1,5 +1,13 @@
 ---
 # Bare-metal MPX track. Run: ansible-playbook -i inventories/example/sites.yml mpx.yml
+# Dry run first: add --check --diff (NITRO read tasks run, change tasks only report).
+#
+# ORDER MATTERS (config-loss fixes, see REVIEW-2026-11-03.md):
+#   1. Build each box standalone (base, optional FIPS, HTTPS-only) and SAVE.
+#   2. License ONE box at a time (LAS warm-reboots the box). Config is saved before the reboot.
+#   3. Pair HA: the intended secondary is locked STAYSECONDARY first, the intended primary adds its peer
+#      first, so the primary's config is what syncs. The secondary is never able to win and push its config.
+#   4. SSL keys on the primary only (synced to the secondary), then SAVE on both.
 - name: Sort ADC nodes by platform
   hosts: adc_sites
   gather_facts: false
@@ -15,7 +23,12 @@
         msg: "{{ site_name }}: platform '{{ platform }}' not decided - skipped. sdx sites use site.yml."
       when: platform != 'mpx'
 
-- name: MPX build
+    - name: Intended HA role (first name of the pair in sort order is the primary, unless ha_primary is set)
+      ansible.builtin.set_fact:
+        mpx_is_primary: "{{ (ha_primary | bool) if ha_primary is defined else (([inventory_hostname, ha_peer] | sort | first) == inventory_hostname) }}"
+      when: platform == 'mpx'
+
+- name: MPX build (each box standalone, then save)
   hosts: platform_mpx
   gather_facts: false
   connection: local
@@ -26,7 +39,23 @@
     - {role: mpx_wait_ready, tags: [wait, always_wait]}
     - {role: mpx_base, tags: [base]}
     - {role: mpx_fips, tags: [fips], when: fips_required | bool}
-    - {role: mpx_ha_pair, tags: [ha]}
+    - {role: mpx_save, tags: [always], when: "ansible_run_tags != ['precheck']"}   # always: any --tags run still saves
+
+- name: MPX license (LAS reboots the box - one box at a time)
+  hosts: platform_mpx
+  gather_facts: false
+  connection: local
+  serial: 1
+  order: reverse_sorted   # secondary-to-be (02) first, so a paired primary is never rebooted first
+  roles:
     - {role: mpx_license, tags: [license]}
+
+- name: MPX HA pair, SSL keys, final save
+  hosts: platform_mpx
+  gather_facts: false
+  connection: local
+  serial: 2
+  roles:
+    - {role: mpx_ha_pair, tags: [ha]}
     - {role: mpx_ssl_keys, tags: [sslkeys]}
-    - {role: mpx_save, tags: [save]}
+    - {role: mpx_save, tags: [always], when: "ansible_run_tags != ['precheck']"}

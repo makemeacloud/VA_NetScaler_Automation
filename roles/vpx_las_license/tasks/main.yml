@@ -10,6 +10,7 @@
   loop: "{{ vpx_instances | selectattr('sdx_host', 'equalto', inventory_hostname) | list }}"
   loop_control: {label: "{{ item.name }}"}
   register: vpx_las_license_state
+  check_mode: false
   delegate_to: localhost
   no_log: true
 

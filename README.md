@@ -10,7 +10,7 @@ EXAMPLE values only. Every `CHANGE_ME` must be filled in. Nothing has touched a 
 5. **vpx_wait_ready** – waits for each NSIP on ports 443 and 22, then retries NITRO login until it works.
 6. **vpx_las_license** – reads license state; LAS activation is a manual step for now.
 7. **vpx_ha_pair** – sets the RPC node password (vault `vault_rpc_node_password`) on both nodes, then adds the HA peer with `ha_peer_id` and INC.
-8. **vpx_post_config** – hostname, NTP, DNS, save.
+8. **vpx_post_config** – hostname, NTP, DNS on each standalone VPX (before HA), then save. LAS runs one SDX at a time; HA locks the first node of each pair as primary; a final save always runs.
 
 ## Step 1 on a lab box: discover field names (read-only)
 Before any real run, check which NITRO field names your SDX build uses. This only does GETs:
@@ -46,7 +46,9 @@ Some NITRO field names are not confirmed (see NOTES below). Test on a lab SDX fi
 
 ## Bare-metal MPX track (8-site program)
 Inventory: `inventories/example/sites.yml` (8 sites, 1 HA pair each, all addresses CHANGE_ME).
-Each site has `platform: mpx | sdx`. Cleveland Lab and Martinsburg are MPX 9200 FIPS.
+Each site has `platform: mpx | sdx`. Cleveland Lab and Martinsburg are MPX 9200 (**non-FIPS**, `platform_model: mpx9200`, `fips_required: false`).
+FIPS is optional everywhere: every FIPS-only check/step is skipped unless `fips_required: true` (then use `platform_model: mpx9200fips`).
+NITRO certificate checks default to off (`nitro_validate_certs: false`) because new boxes have self-signed certs; set true once a trusted cert is on the NSIP.
 The 6 large sites are still OPEN (SDX 17000 or MPX 17000): set `platform` when decided.
 `mpx.yml` builds `mpx` sites and skips undecided ones with a warning. `sdx` sites use `site.yml`.
 Cleveland Lab goes first.
@@ -56,10 +58,12 @@ ansible-playbook -i inventories/example/sites.yml mpx.yml --tags precheck   # sa
 ansible-playbook -i inventories/example/sites.yml mpx.yml --limit site_cle
 ```
 Steps: precheck -> optional NSIP move (`mpx_set_nsip`) -> wait for 443/22 + NITRO login + approved
-firmware check -> hostname/NTP/DNS -> FIPS check and hardening (FIPS sites) -> RPC password + HA pair
-(INC if different subnets) -> license read + LAS reminder -> SSL keys (blocked until FIPS confirmed) -> save.
+NSIP bootstrap (saved on the new IP) -> firmware check -> hostname/NTP/DNS + HTTPS-only GUI -> FIPS (only if fips_required) -> SAVE
+-> license / LAS (ONE node at a time; saves first, LAS reboots, waits, checks HA) -> HA pair (secondary locked STAYSECONDARY,
+primary added first, lock released after sync) -> SSL keys on the primary only -> SAVE. The primary is `ha_primary: true`
+or, if unset, the first host name of the pair in sort order. Saves run on every run, whatever `--tags` you pass.
 
-### FIPS on MPX 9200 FIPS
+### FIPS on MPX 9200 FIPS (only for FIPS boxes; Cleveland/Martinsburg skip this)
 - This model has **no HSM**. Do not use the old `reset fips` / `set fips -initHSM` steps; those are for MPX 14000 FIPS and will not work.
 - It must run the separate 14.1-FIPS firmware. Check: `show system fipsStatus` says "operating in FIPS mode".
 - HA works the same as non-FIPS. No FIPS key sync between nodes.
@@ -146,9 +150,9 @@ Roles `mpx_license` and `vpx_las_license` call `roles/las_apply`, adapted from n
 - `las_apply_mode: offline` (request package -> LAS cloud -> blob -> apply; `las_apply_restricted_mode: true` sends only
   lsid/pubkey) or `blob` (apply a blob already in `/nsconfig/license` with `netscaler.adc.nslaslicense`).
 - Firmware must be **14.1-51.80 or newer** on every LAS path (FIPS too); checked live and in precheck/upgrade.
-- Per host/instance: `las_entitlement_name` exactly as in LAS (e.g. `FIPS MPX 92xx Premium`, `VPX 10000 Premium`).
+- Per host/instance: `las_entitlement_name` exactly as in LAS (e.g. `MPX 9200 Premium` on non-FIPS, `FIPS MPX 92xx Premium` on FIPS, `VPX 10000 Premium`).
   `is_fips` defaults to false on MPX, FIPS MPX included (upstream: true only for FIPS VPX, set per VPX instance);
-  override with `las_is_fips_override`. On FIPS MPX sites the precheck requires `las_entitlement_name` to start with
+  override with `las_is_fips_override`. On FIPS MPX sites only, the precheck requires `las_entitlement_name` to start with
   `FIPS MPX 92` and end with `Premium`; it must **exactly match** the entitlement name in the LAS account.
 - Vault only (never in repo): `vault_las_ccid` (Citrix Cloud customer ID), `vault_las_client_id`,
   `vault_las_client_secret`, `vault_mpx_nsroot_password` / `vault_vpx_nsroot_password` (module requires `nsroot`).
@@ -184,3 +188,8 @@ automation-toolkit gateway golden templates (Terraform): `golden_templates/netsc
 LAS, upgrade and HA pieces are adapted from https://github.com/netscaler/automation-toolkit (commit 45dce5d,
 Jun 12 2026, NetScaler/Cloud Software Group). That repo has **no LICENSE file**; check terms with NetScaler before
 redistributing outside the program. Adapted files carry a source comment.
+
+## Upgrade safety (2026-11-03)
+upgrade_node saves config and makes a full system backup before install; failover/failback wait for peer UP + sync and do not force (`upgrade_force_failover: false`); failback only if the node was really upgraded.
+
+See REVIEW-2026-11-03.md for the full review.

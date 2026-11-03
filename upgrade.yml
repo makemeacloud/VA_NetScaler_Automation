@@ -31,7 +31,7 @@
         that: (t[0], t[1], t[2], t[3]) >= (14, 1, 51, 80)
         fail_msg: "Target {{ upgrade_target_version }} is below 14.1-51.80 (needed for LAS)."
 
-    - name: FIPS sites - target must be on the approved FIPS build list and be a FIPS image
+    - name: FIPS sites only - target must be on the approved FIPS build list and be a FIPS image
       ansible.builtin.assert:
         that:
           - mpx_fips_approved_builds | select('search', upgrade_target_version | regex_escape) | list | length > 0
@@ -51,15 +51,18 @@
         headers: {X-NITRO-USER: "{{ mpx_nitro_user }}", X-NITRO-PASS: "{{ mpx_nitro_pass }}"}
         validate_certs: "{{ mpx_validate_certs }}"
       register: upg_ha
+      check_mode: false
       no_log: true
 
     - name: Role of this node
       vars:
         nodes: "{{ upg_ha.json.hanode | default([]) }}"
         local: "{{ nodes | selectattr('id', 'in', ['0', 0]) | first | default({}) }}"
+        peer: "{{ nodes | rejectattr('id', 'in', ['0', 0]) | first | default({}) }}"
       ansible.builtin.set_fact:
         upg_role: "{{ 'standalone' if nodes | length < 2 else (local.state | default('') | lower) }}"
         upg_sync: "{{ local.hasync | default('') }}"
+        upg_peer_state: "{{ peer.state | default('') | upper }}"
 
     - name: HA pair healthy before upgrade (one primary, one secondary, both seen)
       ansible.builtin.assert:
@@ -80,8 +83,23 @@
   vars_files: [upgrade_vars.yml]
   roles: [upgrade_node]
   post_tasks:
-    - name: Normal mode - fail over so the upgraded node becomes primary
-      when: upg_role == 'secondary' and upgrade_mode == 'normal'
+    - name: Normal mode - peer UP and config in sync before failover
+      when: upg_role == 'secondary' and upgrade_mode == 'normal' and upgrade_node_installed | bool
+      ansible.builtin.uri:
+        url: "https://{{ ansible_host }}/nitro/v1/config/hanode"
+        headers: {X-NITRO-USER: "{{ mpx_nitro_user }}", X-NITRO-PASS: "{{ mpx_nitro_pass }}"}
+        validate_certs: "{{ mpx_validate_certs }}"
+      register: upg_pre_fo
+      until: >-
+        ((upg_pre_fo.json.hanode | rejectattr('id', 'in', ['0', 0]) | first).state | default('') | upper) == 'PRIMARY'
+        and ((upg_pre_fo.json.hanode | selectattr('id', 'in', ['0', 0]) | first).hasync | default('') | upper) in ['SUCCESS', 'ENABLED']
+      retries: 20
+      delay: 15
+      check_mode: false
+      no_log: true
+
+    - name: Normal mode - fail over so the upgraded node becomes primary (no force)
+      when: upg_role == 'secondary' and upgrade_mode == 'normal' and upgrade_node_installed | bool
       netscaler.adc.hafailover:
         nsip: "{{ ansible_host }}"
         nitro_user: "{{ mpx_nitro_user }}"
@@ -89,7 +107,7 @@
         nitro_protocol: https
         validate_certs: "{{ mpx_validate_certs }}"
         state: present
-        force: true
+        force: "{{ upgrade_force_failover | default(false) | bool }}"
       no_log: true
 
     - name: Let HA settle
@@ -104,8 +122,23 @@
   vars_files: [upgrade_vars.yml]
   roles: [upgrade_node]
   post_tasks:
-    - name: Fail back so the original primary is primary again
-      when: upgrade_failback | bool
+    - name: Peer UP and in sync before fail-back
+      when: upgrade_failback | bool and upgrade_node_installed | bool and upgrade_mode == 'normal'
+      ansible.builtin.uri:
+        url: "https://{{ ansible_host }}/nitro/v1/config/hanode"
+        headers: {X-NITRO-USER: "{{ mpx_nitro_user }}", X-NITRO-PASS: "{{ mpx_nitro_pass }}"}
+        validate_certs: "{{ mpx_validate_certs }}"
+      register: upg_pre_fb
+      until: >-
+        ((upg_pre_fb.json.hanode | rejectattr('id', 'in', ['0', 0]) | first).state | default('') | upper) == 'PRIMARY'
+        and ((upg_pre_fb.json.hanode | selectattr('id', 'in', ['0', 0]) | first).hasync | default('') | upper) in ['SUCCESS', 'ENABLED']
+      retries: 20
+      delay: 15
+      check_mode: false
+      no_log: true
+
+    - name: Fail back so the original primary is primary again (only if it was upgraded, no force)
+      when: upgrade_failback | bool and upgrade_node_installed | bool
       netscaler.adc.hafailover:
         nsip: "{{ ansible_host }}"
         nitro_user: "{{ mpx_nitro_user }}"
@@ -113,5 +146,5 @@
         nitro_protocol: https
         validate_certs: "{{ mpx_validate_certs }}"
         state: present
-        force: true
+        force: "{{ upgrade_force_failover | default(false) | bool }}"
       no_log: true

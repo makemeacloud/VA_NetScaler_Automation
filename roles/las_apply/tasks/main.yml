@@ -9,7 +9,7 @@
       - las_apply_mode == 'blob' or (vault_las_ccid is defined and vault_las_client_id is defined
         and vault_las_client_secret is defined)
     fail_msg: >-
-      {{ las_apply_label }}: set las_apply_mode, las_entitlement_name (exact LAS entitlement, e.g. "FIPS MPX 92xx Premium")
+      {{ las_apply_label }}: set las_apply_mode, las_entitlement_name (exact LAS entitlement, e.g. "MPX 9200 Premium"; FIPS box: "FIPS MPX 92xx Premium")
       and vault_las_ccid / vault_las_client_id / vault_las_client_secret in the vault.
 
 - name: Firmware is 14.1-51.80 or newer (required for LAS)
@@ -28,8 +28,44 @@
     that: fw_version_check_ok | bool
     fail_msg: "{{ las_apply_label }} runs '{{ fw_version_check_version }}'; LAS needs {{ las_apply_min_release }}-{{ las_apply_min_build }}+."
 
+- name: Read license state before (read-only)
+  ansible.builtin.uri:
+    url: "https://{{ las_apply_target_nsip }}/nitro/v1/config/nslicense"
+    headers: {X-NITRO-USER: "{{ las_apply_nitro_user }}", X-NITRO-PASS: "{{ las_apply_target_pass }}"}
+    validate_certs: "{{ las_apply_validate_certs }}"
+  register: las_apply_before
+  check_mode: false
+  delegate_to: localhost
+  no_log: true
+
+# Re-run safety: LAS reboots the box, so do not re-apply on a box that already has an edition licensed.
+- name: Already licensed? (skip unless las_apply_force)
+  vars:
+    lic: "{{ las_apply_before.json.nslicense | default({}) }}"
+  ansible.builtin.set_fact:
+    las_apply_skip: >-
+      {{ not (las_apply_force | default(false) | bool) and
+         ((lic.isstandardlic | default(false) | bool) or (lic.isenterpriselic | default(false) | bool)
+          or (lic.isplatinumlic | default(false) | bool)) }}
+
+- name: Skipping LAS - box already licensed
+  ansible.builtin.debug:
+    msg: "{{ las_apply_label }}: an edition is already licensed; LAS not re-applied (set las_apply_force: true to force)."
+  when: las_apply_skip | bool
+
+- name: SAVE config before LAS (LAS warm-reboots the box; unsaved config would be lost)
+  netscaler.adc.save_config:
+    nsip: "{{ las_apply_target_nsip }}"
+    nitro_user: "{{ las_apply_nitro_user }}"
+    nitro_pass: "{{ las_apply_target_pass }}"
+    nitro_protocol: https
+    validate_certs: "{{ las_apply_validate_certs }}"
+  when: not (las_apply_skip | bool)
+  delegate_to: localhost
+  no_log: true
+
 - name: Offline LAS
-  when: las_apply_mode == 'offline'
+  when: las_apply_mode == 'offline' and not (las_apply_skip | bool)
   delegate_to: localhost
   block:
     - name: Blob directory on the control node
@@ -62,7 +98,7 @@
       delegate_to: localhost
 
 - name: Apply LAS blob already on the box (/nsconfig/license)
-  when: las_apply_mode == 'blob'
+  when: las_apply_mode == 'blob' and not (las_apply_skip | bool)
   netscaler.adc.nslaslicense:
     nsip: "{{ las_apply_target_nsip }}"
     nitro_user: "{{ las_apply_nitro_user }}"
@@ -77,11 +113,12 @@
   no_log: true
 
 - name: LAS result (log lines only)
+  when: not (las_apply_skip | bool)
   ansible.builtin.debug:
     msg: "{{ las_apply_label }}: changed={{ las_apply_result.changed | default(false) }} {{ las_apply_result.loglines | default([]) | last | default('') }}"
 
 - name: Wait for reboot to start, then for NITRO login  # noqa: no-handler
-  when: las_apply_result.changed | default(false)
+  when: not (las_apply_skip | bool) and (las_apply_result.changed | default(false))
   delegate_to: localhost
   block:
     - name: Give the warm reboot time to start
@@ -107,6 +144,19 @@
         headers: {X-NITRO-USER: "{{ las_apply_nitro_user }}", X-NITRO-PASS: "{{ las_apply_target_pass }}"}
         validate_certs: "{{ las_apply_validate_certs }}"
       register: las_apply_after
+      no_log: true
+
+    - name: If the box is in an HA pair, the peer must be seen again after the reboot
+      ansible.builtin.uri:
+        url: "https://{{ las_apply_target_nsip }}/nitro/v1/config/hanode"
+        headers: {X-NITRO-USER: "{{ las_apply_nitro_user }}", X-NITRO-PASS: "{{ las_apply_target_pass }}"}
+        validate_certs: "{{ las_apply_validate_certs }}"
+      register: las_apply_ha
+      until: >-
+        (las_apply_ha.json.hanode | default([]) | length) < 2 or
+        ((las_apply_ha.json.hanode | rejectattr('id', 'in', ['0', 0]) | first).state | default('') | upper) in ['PRIMARY', 'SECONDARY']
+      retries: 20
+      delay: 15
       no_log: true
 
     - name: Show licensed edition

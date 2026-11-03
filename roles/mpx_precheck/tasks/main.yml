@@ -38,6 +38,22 @@
       | reject('search', 'CHANGE_ME') | list | length > 0
     fail_msg: "{{ site_name }}: set the approved firmware build list (FIPS build for MPX 9200 FIPS)."
 
+- name: FIPS flag matches the model (mpx9200 = non-FIPS, mpx9200fips = FIPS)
+  ansible.builtin.assert:
+    that:
+      - (fips_required | bool) == ('fips' in (platform_model | lower))
+    fail_msg: >-
+      {{ inventory_hostname }}: fips_required is {{ fips_required }} but platform_model is '{{ platform_model }}'.
+      Non-FIPS: platform_model mpx9200 (or mpx17000) + fips_required false. FIPS: mpx9200fips + fips_required true.
+
+- name: LAS entitlement is filled in when LAS is turned on (any model)
+  ansible.builtin.assert:
+    that:
+      - las_entitlement_name is defined
+      - las_entitlement_name | length > 0 and 'CHANGE_ME' not in las_entitlement_name
+    fail_msg: "{{ inventory_hostname }}: las_apply is true; set las_entitlement_name exactly as in the LAS account (e.g. 'MPX 9200 Premium')."
+  when: las_apply | default(false) | bool
+
 - name: Refuse destructive HSM init on MPX 9200 FIPS (it has no HSM)
   ansible.builtin.assert:
     that: not (platform_model == 'mpx9200fips' and fips_hsm_init_confirm == 'ERASE-FIPS-HSM')
@@ -53,7 +69,7 @@
       from the console (nsroot_console_verified: true) and an LDAP admin logs in (ldap_admin_login_verified: true).
   when: fips_disable_local_auth | default(false) | bool
 
-- name: FIPS MPX LAS entitlement looks right (must exactly match the LAS account)
+- name: FIPS MPX LAS entitlement looks right (FIPS sites only; must exactly match the LAS account)
   ansible.builtin.assert:
     that:
       - las_entitlement_name is defined
@@ -62,4 +78,4 @@
     fail_msg: >-
       {{ inventory_hostname }}: las_entitlement_name '{{ las_entitlement_name | default('') }}' must start with
       'FIPS MPX 92' and end with 'Premium', exactly as listed in the LAS account.
-  when: fips_required | bool and platform_model == 'mpx9200fips'
+  when: fips_required | bool and platform_model == 'mpx9200fips' and las_apply | default(false) | bool

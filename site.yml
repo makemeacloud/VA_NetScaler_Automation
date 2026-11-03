@@ -1,4 +1,7 @@
 ---
+# SDX / VPX track. Order (config-loss fixes, see REVIEW-2026-11-03.md):
+# provision -> wait -> license ONE SDX at a time (VPX warm-reboots) -> hostname/NTP/DNS + SAVE on each
+# standalone VPX -> HA pair (primary locked first) -> SAVE.
 - name: NetScaler SDX VPX build
   hosts: sdx
   gather_facts: false
@@ -8,7 +11,21 @@
     - {role: sdx_image_upload, tags: [image]}
     - {role: sdx_admin_profile, tags: [profile]}
     - {role: vpx_provision, tags: [provision]}
-    - {role: vpx_wait_ready, tags: [wait, provision, ha, postconfig]}
+    - {role: vpx_wait_ready, tags: [wait, provision, ha, postconfig, license]}
+
+- name: VPX license (one SDX at a time so both HA nodes never reboot together)
+  hosts: sdx
+  gather_facts: false
+  connection: local
+  serial: 1
+  roles:
     - {role: vpx_las_license, tags: [license]}
-    - {role: vpx_ha_pair, tags: [ha]}
+
+- name: VPX post-config on standalone nodes, then HA
+  hosts: sdx
+  gather_facts: false
+  connection: local
+  roles:
     - {role: vpx_post_config, tags: [postconfig]}
+    - {role: vpx_ha_pair, tags: [ha]}
+    - {role: vpx_save, tags: [always], when: "ansible_run_tags != ['precheck']"}

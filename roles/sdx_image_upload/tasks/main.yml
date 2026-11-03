@@ -6,6 +6,7 @@
     headers: "{{ nitro_headers }}"
     validate_certs: "{{ nitro_validate_certs }}"
   register: sdx_image_upload_list
+  check_mode: false
   delegate_to: localhost
 
 - name: Upload XVA image if missing

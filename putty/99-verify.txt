@@ -1,0 +1,14 @@
+# 99-verify.txt  -  READ ONLY. Run on each box after its .conf file.
+show ns hostname
+show ns ip
+show route
+show dns nameServer
+show ntp server
+show ntp status
+show ns param
+show system parameter
+# show system fipsStatus   (FIPS boxes only)
+show ns rpcNode
+show ha node
+# Want (after BOTH boxes are done): node 0 Primary or Secondary, node 1 = the peer, state UP, sync ENABLED
+show license

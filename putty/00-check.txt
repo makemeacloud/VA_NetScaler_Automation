@@ -1,0 +1,13 @@
+# 00-check.txt  -  READ ONLY. Changes nothing. Run on each box first.
+# Log in with PuTTY as nsroot, then paste these lines.
+show version
+# Want: NetScaler NS14.1, build 51.80 or newer (FIPS boxes only: the build says FIPS)
+# FIPS boxes only (skip on non-FIPS):
+# show system fipsStatus   -> "System is operating in FIPS mode"
+show ns ip
+show ha node
+show license
+show ns hostname
+show ntp server
+show dns nameServer
+show route

@@ -3,9 +3,11 @@
 # (file:///var/nsinstall/... pre-staged, or https/sftp URL). No credentials in the URL - use file://.
 upgrade_confirm: false
 upgrade_mode: normal          # normal | issu (In Service Software Upgrade, keeps sessions via nsmigration)
-upgrade_target_version: "CHANGE_ME"   # e.g. 14.1-51.80 (FIPS: must be in mpx_fips_approved_builds)
-upgrade_build_url: "CHANGE_ME"        # e.g. file:///var/nsinstall/build-14.1-51.80_nc_64.tgz (FIPS image on FIPS)
+upgrade_target_version: "CHANGE_ME"   # e.g. 14.1-51.80 (FIPS sites only: must be in mpx_fips_approved_builds)
+upgrade_build_url: "CHANGE_ME"        # e.g. file:///var/nsinstall/build-14.1-51.80_nc_64.tgz (FIPS image only on FIPS boxes)
 upgrade_reboot_pause_s: 120
 upgrade_settle_s: 60
 upgrade_issu_poll_retries: 20
 upgrade_failback: true
+upgrade_backup: true          # full system backup on the box before install
+upgrade_force_failover: false # never force a failover unless you know the peer is healthy

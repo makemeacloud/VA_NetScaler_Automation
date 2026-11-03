@@ -7,6 +7,7 @@
       X-NITRO-PASS: "{{ mpx_nitro_pass }}"
     validate_certs: "{{ mpx_validate_certs }}"
   register: mpx_license_state
+  check_mode: false
   no_log: true
 
 - name: LAS not requested

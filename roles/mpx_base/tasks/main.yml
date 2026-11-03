@@ -1,4 +1,21 @@
 ---
+# Safe to re-run. On a box that is already the HA SECONDARY, only the hostname (node-specific) is set:
+# NTP/DNS changes on a secondary are not propagated and are overwritten by the next sync from the primary.
+- name: Read HA state (read-only)
+  ansible.builtin.uri:
+    url: "https://{{ ansible_host }}/nitro/v1/config/hanode"
+    headers: {X-NITRO-USER: "{{ mpx_nitro_user }}", X-NITRO-PASS: "{{ mpx_nitro_pass }}"}
+    validate_certs: "{{ mpx_validate_certs }}"
+  register: mpx_base_ha
+  check_mode: false
+  no_log: true
+
+- name: Is this box currently an HA secondary?
+  vars:
+    local: "{{ mpx_base_ha.json.hanode | default([]) | selectattr('id', 'in', ['0', 0]) | first | default({}) }}"
+  ansible.builtin.set_fact:
+    mpx_base_is_secondary: "{{ (mpx_base_ha.json.hanode | default([]) | length) > 1 and (local.state | default('') | lower) == 'secondary' }}"
+
 - name: Set hostname
   netscaler.adc.nshostname:
     nsip: "{{ ansible_host }}"
@@ -20,6 +37,7 @@
     state: present
     serverip: "{{ item }}"
   loop: "{{ mpx_ntp_servers }}"
+  when: not (mpx_base_is_secondary | bool)
   no_log: true
 
 - name: Add DNS name servers
@@ -32,4 +50,20 @@
     state: present
     ip: "{{ item }}"
   loop: "{{ mpx_dns_servers }}"
+  when: not (mpx_base_is_secondary | bool)
+  no_log: true
+
+# General hardening (FIPS or not). Changes ONLY the gui flag of the NSIP: the body carries just the
+# ipaddress key + gui, so netmask/mgmt flags are untouched (the old nsip-module call also sent netmask
+# and could try to modify/recreate the NSIP). NITRO "PUT config/nsip" = "set ns ip <NSIP> -gui SECUREONLY".
+- name: GUI / NITRO over HTTPS only on the NSIP
+  ansible.builtin.uri:
+    url: "https://{{ ansible_host }}/nitro/v1/config/nsip"
+    method: PUT
+    headers: {X-NITRO-USER: "{{ mpx_nitro_user }}", X-NITRO-PASS: "{{ mpx_nitro_pass }}"}
+    body_format: json
+    body: {nsip: {ipaddress: "{{ ansible_host }}", gui: SECUREONLY}}
+    status_code: [200, 201]
+    validate_certs: "{{ mpx_validate_certs }}"
+  when: mpx_gui_https_only | default(true) | bool
   no_log: true

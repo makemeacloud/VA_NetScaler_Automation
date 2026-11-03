@@ -3,12 +3,13 @@
 # Secrets go in ansible-vault: vault_mpx_nsroot_password, vault_rpc_node_password.
 mpx_nitro_user: "CHANGE_ME"
 mpx_nitro_pass: "{{ vault_mpx_nsroot_password | default('CHANGE_ME') }}"
-mpx_validate_certs: true
+mpx_validate_certs: "{{ nitro_validate_certs | default(false) }}"   # false = accept self-signed (first build)
+mpx_gui_https_only: true          # NSIP GUI/NITRO over HTTPS only (general hardening, FIPS or not)
 rpc_node_password: "{{ vault_rpc_node_password | default('CHANGE_ME') }}"
 
-# Firmware: MPX 9200 FIPS must run 14.1-FIPS (separate image). Put the exact approved build here.
-mpx_fips_approved_builds: ["CHANGE_ME"]   # e.g. the build string from "show version", agreed with ATO team
-mpx_non_fips_approved_builds: ["CHANGE_ME"]   # for MPX 17000 if chosen
+# Firmware: approved builds. Non-FIPS boxes use mpx_non_fips_approved_builds; FIPS boxes use the FIPS list (14.1-FIPS image).
+mpx_fips_approved_builds: ["CHANGE_ME"]   # FIPS sites only. e.g. the build string from "show version", agreed with ATO team
+mpx_non_fips_approved_builds: ["CHANGE_ME"]   # Cleveland / Martinsburg MPX 9200 (non-FIPS) and MPX 17000
 
 # Optional first-boot step: move NSIP from the console/bootstrap address to the final one.
 mpx_set_nsip: false
@@ -19,8 +20,8 @@ mpx_dns_servers: ["CHANGE_ME_DNS"]
 mpx_wait_timeout_s: 900
 mpx_nitro_login_retries: 30
 
-# FIPS (MPX 9200 FIPS). There is NO HSM on this model; see NOTES-unverified.md.
-fips_hardening: true              # strong passwords + GUI SECUREONLY (from MPX FIPS docs)
+# FIPS - ONLY used when a site has fips_required: true (current boxes are NOT FIPS). There is NO HSM on this model; see NOTES-unverified.md.
+fips_hardening: true              # FIPS sites only: strong passwords
 fips_disable_local_auth: false    # only after LDAP admin login is tested (docs step 4)
 # Operator confirmations, both required before local auth can be disabled:
 nsroot_console_verified: false     # set true only after nsroot login works from the serial/LOM console
@@ -35,5 +36,5 @@ mpx_ssl_certkeys: []              # list of {certkey, cert, key}; files already 
 # vault_mpx_nsroot_password (module must log in as nsroot).
 las_apply: false
 las_apply_mode: offline                 # offline | blob
-las_entitlement_name: "CHANGE_ME"   # exact name from the LAS account; FIPS MPX: "FIPS MPX 92... Premium"
+las_entitlement_name: "CHANGE_ME"   # exact name from the LAS account; non-FIPS e.g. "MPX 9200 Premium"; FIPS MPX: "FIPS MPX 92... Premium"
 # las_is_fips_override: true      # default false on MPX (FIPS MPX too); is_fips is for FIPS VPX only

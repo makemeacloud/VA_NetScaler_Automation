@@ -11,8 +11,8 @@ all:
             site_name: "Cleveland Lab"
             site_size: small
             platform: "mpx"   # from slides
-            platform_model: "mpx9200fips"   # MPX 9200 FIPS
-            fips_required: true
+            platform_model: "mpx9200"   # MPX 9200 (non-FIPS). FIPS box: "mpx9200fips" + fips_required: true
+            fips_required: false
             ha_inc_mode: false   # CHANGE_ME: true if the two NSIPs are on different subnets
             ha_peer_id: 1        # hanode id of the peer entry (1-64), same on both nodes
           hosts:
@@ -31,8 +31,8 @@ all:
             site_name: "Martinsburg"
             site_size: small
             platform: "mpx"   # from slides
-            platform_model: "mpx9200fips"   # MPX 9200 FIPS
-            fips_required: true
+            platform_model: "mpx9200"   # MPX 9200 (non-FIPS). FIPS box: "mpx9200fips" + fips_required: true
+            fips_required: false
             ha_inc_mode: false   # CHANGE_ME: true if the two NSIPs are on different subnets
             ha_peer_id: 1        # hanode id of the peer entry (1-64), same on both nodes
           hosts:

@@ -1,10 +1,13 @@
 ---
-- name: Guard - no SSL key import before FIPS is confirmed
+# FIPS gate only applies when fips_required is true. Keys are added on the PRIMARY only; HA sync copies
+# the certkey config (and /nsconfig/ssl files) to the secondary. Adding them on a secondary is not propagated.
+- name: Guard - no SSL key import before FIPS is confirmed (FIPS sites only)
   ansible.builtin.assert:
-    that: not (fips_required | bool) or (mpx_fips_ready | default(false) | bool)
+    that: mpx_fips_ready | default(false) | bool
     fail_msg: "{{ inventory_hostname }}: FIPS not confirmed. SSL key import blocked."
+  when: fips_required | bool
 
-- name: Add certificate/key pairs (files already on /nsconfig/ssl)
+- name: Add certificate/key pairs (files already on /nsconfig/ssl of the primary)
   netscaler.adc.sslcertkey:
     nsip: "{{ ansible_host }}"
     nitro_user: "{{ mpx_nitro_user }}"
@@ -17,4 +20,5 @@
     key: "{{ item.key }}"
   loop: "{{ mpx_ssl_certkeys }}"
   loop_control: {label: "{{ item.certkey }}"}
+  when: mpx_is_primary | bool
   no_log: true

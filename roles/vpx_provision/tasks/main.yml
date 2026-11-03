@@ -1,7 +1,27 @@
 ---
 # Field names follow the SDX NITRO "ns" resource. UNVERIFIED: num_pes, number_of_ssl_cores,
 # license, cpu_core_sharing value mapping, and per-interface vlan_filtering / allowed VLAN fields.
-- name: Provision VPX instances that belong to this SDX
+- name: List VPX instances already on this SDX (read-only)
+  ansible.builtin.uri:
+    url: "{{ nitro_base }}/config/ns"
+    headers: "{{ nitro_headers }}"
+    validate_certs: "{{ nitro_validate_certs }}"
+  register: vpx_provision_existing
+  check_mode: false
+  delegate_to: localhost
+  no_log: true
+
+- name: Existing instance names
+  ansible.builtin.set_fact:
+    vpx_provision_names: "{{ vpx_provision_existing.json.ns | default([]) | map(attribute='name') | list }}"
+
+- name: Already provisioned - skipped (not modified; change sizing in the MS GUI on purpose)
+  ansible.builtin.debug:
+    msg: "{{ item.name }} already exists on {{ inventory_hostname }} - skipped."
+  loop: "{{ vpx_instances | selectattr('sdx_host', 'equalto', inventory_hostname) | selectattr('name', 'in', vpx_provision_names) | list }}"
+  loop_control: {label: "{{ item.name }}"}
+
+- name: Provision VPX instances that belong to this SDX (only missing ones)
   ansible.builtin.uri:
     url: "{{ nitro_base }}/config/ns"
     method: POST
@@ -28,7 +48,7 @@
     status_code: [200, 201, 202]
     validate_certs: "{{ nitro_validate_certs }}"
     timeout: 1800
-  loop: "{{ vpx_instances | selectattr('sdx_host', 'equalto', inventory_hostname) | list }}"
+  loop: "{{ vpx_instances | selectattr('sdx_host', 'equalto', inventory_hostname) | rejectattr('name', 'in', vpx_provision_names) | list }}"
   loop_control: {label: "{{ item.name }}"}
   delegate_to: localhost
   no_log: true

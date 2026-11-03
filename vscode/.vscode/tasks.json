@@ -1,0 +1,87 @@
+{
+  "version": "2.0.0",
+  "inputs": [
+    {
+      "id": "confirm",
+      "type": "pickString",
+      "description": "Really upgrade the firmware? This reboots the boxes.",
+      "options": [
+        "false",
+        "true"
+      ],
+      "default": "false"
+    },
+    {
+      "id": "target",
+      "type": "promptString",
+      "description": "Target build, e.g. 14.1-51.80"
+    },
+    {
+      "id": "buildurl",
+      "type": "promptString",
+      "description": "Build file on the box, e.g. file:///var/nsinstall/build-14.1-51.80_nc_64.tgz (FIPS boxes only: use the FIPS image)"
+    },
+    {
+      "id": "limit",
+      "type": "promptString",
+      "description": "Which site or box (e.g. site_cle or cle_adc_01)",
+      "default": "site_cle"
+    },
+    {
+      "id": "cidr",
+      "type": "promptString",
+      "description": "Network to scan, e.g. 10.0.0.0/24"
+    }
+  ],
+  "tasks": [
+    {
+      "label": "1. Discovery tool (Windows python)",
+      "type": "shell",
+      "command": "python.exe scripts/ns_discover.py --cidr ${input:cidr} --out out/ --insecure",
+      "problemMatcher": [],
+      "detail": "Read only. Uses Windows python (python.exe) even from WSL. Asks for the nsadmin password. Not for a brand-new box."
+    },
+    {
+      "label": "2. Precheck Cleveland one box",
+      "type": "shell",
+      "command": "source ~/nsenv/bin/activate && ansible-playbook -i inventories/example/sites.yml mpx.yml --tags precheck --limit cle_adc_01 -e @vault.yml --ask-vault-pass",
+      "problemMatcher": [],
+      "detail": "Safe. Only checks the settings files. Does not touch the box (no save runs with --tags precheck)."
+    },
+    {
+      "label": "2b. Dry run Cleveland one box (--check)",
+      "type": "shell",
+      "command": "source ~/nsenv/bin/activate && ansible-playbook -i inventories/example/sites.yml mpx.yml --check --diff --limit cle_adc_01 --skip-tags ha -e @vault.yml --ask-vault-pass",
+      "problemMatcher": [],
+      "detail": "Read-only dry run: logs in and reads the box, changes nothing."
+    },
+    {
+      "label": "3. Build Cleveland one box",
+      "type": "shell",
+      "command": "source ~/nsenv/bin/activate && ansible-playbook -i inventories/example/sites.yml mpx.yml --limit cle_adc_01 --skip-tags ha -e @vault.yml --ask-vault-pass",
+      "problemMatcher": [],
+      "detail": "Builds cle_adc_01 only. Skips HA. Saves config at the end."
+    },
+    {
+      "label": "4. Build HA pair (Cleveland)",
+      "type": "shell",
+      "command": "source ~/nsenv/bin/activate && ansible-playbook -i inventories/example/sites.yml mpx.yml --limit site_cle -e @vault.yml --ask-vault-pass",
+      "problemMatcher": [],
+      "detail": "Both boxes cabled and reachable. Primary = ha_primary or cle_adc_01. Licenses one box at a time (LAS reboots)."
+    },
+    {
+      "label": "5. Upgrade firmware",
+      "type": "shell",
+      "command": "source ~/nsenv/bin/activate && ansible-playbook -i inventories/example/sites.yml upgrade.yml --limit ${input:limit} -e upgrade_confirm=${input:confirm} -e upgrade_target_version=${input:target} -e upgrade_build_url=${input:buildurl} -e @vault.yml --ask-vault-pass",
+      "problemMatcher": [],
+      "detail": "Reboots boxes. Saves + backs up first. Pick 'true' at the prompt or it stops."
+    },
+    {
+      "label": "6. Edit vault (passwords)",
+      "type": "shell",
+      "command": "source ~/nsenv/bin/activate && if [ -f vault.yml ]; then ansible-vault edit vault.yml; else ansible-vault create vault.yml; fi",
+      "problemMatcher": [],
+      "detail": "Holds vault_mpx_nsroot_password and vault_rpc_node_password. Never upload this file."
+    }
+  ]
+}

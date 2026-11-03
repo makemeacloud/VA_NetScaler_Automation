@@ -1,9 +1,11 @@
 ---
+# Runs BEFORE vpx_ha_pair, while each VPX is still standalone, so nothing is set on a secondary.
 - name: Set hostname
   netscaler.adc.nshostname:
     nsip: "{{ item.nsip }}"
     nitro_user: "{{ admin_profile_user }}"
     nitro_pass: "{{ admin_profile_password }}"
+    nitro_protocol: https
     validate_certs: "{{ nitro_validate_certs }}"
     state: present
     hostname: "{{ post_config.hostname_prefix }}-{{ item.name }}"
@@ -17,6 +19,7 @@
     nsip: "{{ item.0.nsip }}"
     nitro_user: "{{ admin_profile_user }}"
     nitro_pass: "{{ admin_profile_password }}"
+    nitro_protocol: https
     validate_certs: "{{ nitro_validate_certs }}"
     state: present
     serverip: "{{ item.1 }}"
@@ -30,6 +33,7 @@
     nsip: "{{ item.0.nsip }}"
     nitro_user: "{{ admin_profile_user }}"
     nitro_pass: "{{ admin_profile_password }}"
+    nitro_protocol: https
     validate_certs: "{{ nitro_validate_certs }}"
     state: present
     ip: "{{ item.1 }}"
@@ -43,6 +47,7 @@
     nsip: "{{ item.nsip }}"
     nitro_user: "{{ admin_profile_user }}"
     nitro_pass: "{{ admin_profile_password }}"
+    nitro_protocol: https
     validate_certs: "{{ nitro_validate_certs }}"
   loop: "{{ vpx_instances | selectattr('sdx_host', 'equalto', inventory_hostname) | list }}"
   loop_control: {label: "{{ item.name }}"}
