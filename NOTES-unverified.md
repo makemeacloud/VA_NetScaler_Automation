@@ -107,3 +107,19 @@ UNVERIFIED (nothing run on a device):
 - PUT /nitro/v1/config/nsip with only {ipaddress, gui: SECUREONLY} for HTTPS-only GUI.
 - SDX `config/ns` listing used by vpx_provision to skip existing VPX names.
 - STAYPRIMARY/STAYSECONDARY lock + release order during pairing (doc-backed, not lab-tested).
+
+## ns_migrate.py (added 2026-11-03) - nothing run against a device
+Tested offline only (unit tests on a synthetic ns.conf; export against a mocked NITRO client).
+UNVERIFIED:
+- NITRO `config/nsrunningconfig` / `config/nssavedconfig` reply field names: the tool takes the longest string
+  in the reply. Whether a read-only command policy allows them (show commands, should).
+- `config/systemfile?args=filename:X,filelocation:%2Fnsconfig%2Fssl` returns base64 `filecontent`; whether
+  nsadmin/read-only may read /nsconfig/ssl (keys especially).
+- Stat fields `stat/ns` rxmbitsrate/txmbitsrate/cpuusagepcnt/memusagepcnt and `stat/ssl` ssltransactionsrate.
+- FIPS lint: weak-cipher pattern and SSLv3/TLS1.0/1.1 as "not allowed" are assumptions; check the 14.1-FIPS
+  cipher list. Which classic authentication policies still load on 14.1-FIPS.
+- KEK: secrets with `-kek` / ENCMTHD_3+ assumed not to decrypt on another box without the old box's key files;
+  check NetScaler's procedure (or re-enter the secrets).
+- Classic expression detection is pattern-based (REQ./RES. classic syntax, ns_* built-ins except ns_adv_*);
+  nspepi is the real converter.
+- 9200 interface names: take from `show interface` on the new box; nothing is assumed.

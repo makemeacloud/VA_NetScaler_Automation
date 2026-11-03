@@ -77,6 +77,32 @@ or, if unset, the first host name of the pair in sort order. Saves run on every 
 4. Set `disable_local_auth: true` and run `--tags precheck,base`. Without both confirmations, it stops.
 5. Check LDAP admin login again, and nsroot from console, before moving on.
 
+## Config migration to MPX 9200 FIPS (`scripts/ns_migrate.py`, stages 1-4)
+Moves each old box's config onto a new 9200 pair built by `mpx.yml`. Built so far: export, transform, lint,
+merge-check. **Nothing here writes to any NetScaler.** Apply, validation and cutover/rollback are not built yet.
+```
+pip install requests pyyaml
+# 1. export (READ-ONLY): running + saved config, version, HA state, stats snapshot, SSL files that certKeys use
+python3 scripts/ns_migrate.py export --hosts old_adcs.txt --out migration_out [--include-keys] [--insecure]
+# 2. classic policies: run NetScaler's nspepi on migration_out/<host>/ns.conf and review its output
+# 3. transform for the 9200 (copy migration/example_map.yml per box: interfaces, optional re-IP); runs lint
+python3 scripts/ns_migrate.py transform migration_out/<host>/ns.conf --map migration/<host>_map.yml   --out migration_out/<host>/new --ssl-dir migration_out/<host>/ssl   --stats migration_out/<host>/meta.json --limits migration/example_limits.yml
+# 4. several old boxes onto one new pair? check for collisions
+python3 scripts/ns_migrate.py merge-check migration_out/*/new/*.migrated.conf
+```
+- Export the HA **primary** of each old pair. `meta.json` flags running != saved config (unsaved changes on the box).
+- `--include-keys` writes private keys to disk (0600 on Linux/macOS; on Windows use a protected folder). Delete
+  after import. HSM keys (`-fipsKey`, MPX/SDX 14000 FIPS) cannot be exported: issue new keys on the 9200.
+- transform strips lines that belong to the old box (NSIP, hostname, HA node, RPC node, nsroot, link-local IPv6,
+  encryption params, SNMP engine id, legacy `ssl fips`, cluster) into `<host>.stripped.csv`; the playbooks set those.
+- Exit code 1 means BLOCK findings: unmapped interfaces, classic policies/features (filter, sc, pq, `ns_true`,
+  `REQ.HTTP...`, CS `-url`/`-domain`), HSM keys, missing cert files, name/VIP collisions.
+  WARN: weak ciphers, SSLv3/TLS1.0/1.1 enabled, secrets encrypted with the old box's key (re-enter them),
+  classic authentication policies, admin partitions (their config is not in the default ns.conf), sizing.
+- FIPS cipher/protocol rules are heuristics: confirm against the 14.1-FIPS docs for your build.
+- Sizing uses one stats snapshot, not a peak: use ADM/SNMP history for the real number.
+- Tests: `python3 -m unittest discover -s tests` (synthetic sample config in `tests/fixtures`).
+
 ## Discovery and mapping tool (read-only)
 From a browser bookmarks HTML export (already parsed into `inventories/bookmarks_hosts.txt`):
 ```
