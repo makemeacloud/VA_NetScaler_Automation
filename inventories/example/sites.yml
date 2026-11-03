@@ -1,0 +1,168 @@
+---
+# EXAMPLE ONLY. 8 sites, 1 HA pair each (Phase 1 design outline). All addresses are CHANGE_ME.
+# Group/host keys are working labels, NOT the agreed naming standard (<site>-<adc>-<01|02> is still to confirm).
+# platform: mpx | sdx  (large sites are OPEN: SDX 17000 or MPX 17000)
+all:
+  children:
+    adc_sites:
+      children:
+        site_cle:
+          vars:
+            site_name: "Cleveland Lab"
+            site_size: small
+            platform: "mpx"   # from slides
+            platform_model: "mpx9200fips"   # MPX 9200 FIPS
+            fips_required: true
+            ha_inc_mode: false   # CHANGE_ME: true if the two NSIPs are on different subnets
+            ha_peer_id: 1        # hanode id of the peer entry (1-64), same on both nodes
+          hosts:
+            cle_adc_01:
+              ansible_host: "CHANGE_ME_NSIP"
+              nsip_netmask: "CHANGE_ME_MASK"
+              ha_peer: cle_adc_02
+              hostname: "CHANGE_ME_HOSTNAME"
+            cle_adc_02:
+              ansible_host: "CHANGE_ME_NSIP"
+              nsip_netmask: "CHANGE_ME_MASK"
+              ha_peer: cle_adc_01
+              hostname: "CHANGE_ME_HOSTNAME"
+        site_mrb:
+          vars:
+            site_name: "Martinsburg"
+            site_size: small
+            platform: "mpx"   # from slides
+            platform_model: "mpx9200fips"   # MPX 9200 FIPS
+            fips_required: true
+            ha_inc_mode: false   # CHANGE_ME: true if the two NSIPs are on different subnets
+            ha_peer_id: 1        # hanode id of the peer entry (1-64), same on both nodes
+          hosts:
+            mrb_adc_01:
+              ansible_host: "CHANGE_ME_NSIP"
+              nsip_netmask: "CHANGE_ME_MASK"
+              ha_peer: mrb_adc_02
+              hostname: "CHANGE_ME_HOSTNAME"
+            mrb_adc_02:
+              ansible_host: "CHANGE_ME_NSIP"
+              nsip_netmask: "CHANGE_ME_MASK"
+              ha_peer: mrb_adc_01
+              hostname: "CHANGE_ME_HOSTNAME"
+        site_chi:
+          vars:
+            site_name: "Gateway North Chicago"
+            site_size: large
+            platform: "CHANGE_ME"   # CHANGE_ME: sdx | mpx
+            platform_model: "CHANGE_ME"   # SDX 17000 or MPX 17000 (OPEN)
+            fips_required: false
+            ha_inc_mode: false   # CHANGE_ME: true if the two NSIPs are on different subnets
+            ha_peer_id: 1        # hanode id of the peer entry (1-64), same on both nodes
+          hosts:
+            chi_adc_01:
+              ansible_host: "CHANGE_ME_NSIP"
+              nsip_netmask: "CHANGE_ME_MASK"
+              ha_peer: chi_adc_02
+              hostname: "CHANGE_ME_HOSTNAME"
+            chi_adc_02:
+              ansible_host: "CHANGE_ME_NSIP"
+              nsip_netmask: "CHANGE_ME_MASK"
+              ha_peer: chi_adc_01
+              hostname: "CHANGE_ME_HOSTNAME"
+        site_dal:
+          vars:
+            site_name: "Gateway South Dallas"
+            site_size: large
+            platform: "CHANGE_ME"   # CHANGE_ME: sdx | mpx
+            platform_model: "CHANGE_ME"   # SDX 17000 or MPX 17000 (OPEN)
+            fips_required: false
+            ha_inc_mode: false   # CHANGE_ME: true if the two NSIPs are on different subnets
+            ha_peer_id: 1        # hanode id of the peer entry (1-64), same on both nodes
+          hosts:
+            dal_adc_01:
+              ansible_host: "CHANGE_ME_NSIP"
+              nsip_netmask: "CHANGE_ME_MASK"
+              ha_peer: dal_adc_02
+              hostname: "CHANGE_ME_HOSTNAME"
+            dal_adc_02:
+              ansible_host: "CHANGE_ME_NSIP"
+              nsip_netmask: "CHANGE_ME_MASK"
+              ha_peer: dal_adc_01
+              hostname: "CHANGE_ME_HOSTNAME"
+        site_ster:
+          vars:
+            site_name: "Gateway East Sterling"
+            site_size: large
+            platform: "CHANGE_ME"   # CHANGE_ME: sdx | mpx
+            platform_model: "CHANGE_ME"   # SDX 17000 or MPX 17000 (OPEN)
+            fips_required: false
+            ha_inc_mode: false   # CHANGE_ME: true if the two NSIPs are on different subnets
+            ha_peer_id: 1        # hanode id of the peer entry (1-64), same on both nodes
+          hosts:
+            ster_adc_01:
+              ansible_host: "CHANGE_ME_NSIP"
+              nsip_netmask: "CHANGE_ME_MASK"
+              ha_peer: ster_adc_02
+              hostname: "CHANGE_ME_HOSTNAME"
+            ster_adc_02:
+              ansible_host: "CHANGE_ME_NSIP"
+              nsip_netmask: "CHANGE_ME_MASK"
+              ha_peer: ster_adc_01
+              hostname: "CHANGE_ME_HOSTNAME"
+        site_sjc:
+          vars:
+            site_name: "Gateway West San Jose"
+            site_size: large
+            platform: "CHANGE_ME"   # CHANGE_ME: sdx | mpx
+            platform_model: "CHANGE_ME"   # SDX 17000 or MPX 17000 (OPEN)
+            fips_required: false
+            ha_inc_mode: false   # CHANGE_ME: true if the two NSIPs are on different subnets
+            ha_peer_id: 1        # hanode id of the peer entry (1-64), same on both nodes
+          hosts:
+            sjc_adc_01:
+              ansible_host: "CHANGE_ME_NSIP"
+              nsip_netmask: "CHANGE_ME_MASK"
+              ha_peer: sjc_adc_02
+              hostname: "CHANGE_ME_HOSTNAME"
+            sjc_adc_02:
+              ansible_host: "CHANGE_ME_NSIP"
+              nsip_netmask: "CHANGE_ME_MASK"
+              ha_peer: sjc_adc_01
+              hostname: "CHANGE_ME_HOSTNAME"
+        site_aus:
+          vars:
+            site_name: "Austin Enterprise DC"
+            site_size: large
+            platform: "CHANGE_ME"   # CHANGE_ME: sdx | mpx
+            platform_model: "CHANGE_ME"   # SDX 17000 or MPX 17000 (OPEN)
+            fips_required: false
+            ha_inc_mode: false   # CHANGE_ME: true if the two NSIPs are on different subnets
+            ha_peer_id: 1        # hanode id of the peer entry (1-64), same on both nodes
+          hosts:
+            aus_adc_01:
+              ansible_host: "CHANGE_ME_NSIP"
+              nsip_netmask: "CHANGE_ME_MASK"
+              ha_peer: aus_adc_02
+              hostname: "CHANGE_ME_HOSTNAME"
+            aus_adc_02:
+              ansible_host: "CHANGE_ME_NSIP"
+              nsip_netmask: "CHANGE_ME_MASK"
+              ha_peer: aus_adc_01
+              hostname: "CHANGE_ME_HOSTNAME"
+        site_phl:
+          vars:
+            site_name: "Philadelphia Enterprise DC"
+            site_size: large
+            platform: "CHANGE_ME"   # CHANGE_ME: sdx | mpx
+            platform_model: "CHANGE_ME"   # SDX 17000 or MPX 17000 (OPEN)
+            fips_required: false
+            ha_inc_mode: false   # CHANGE_ME: true if the two NSIPs are on different subnets
+            ha_peer_id: 1        # hanode id of the peer entry (1-64), same on both nodes
+          hosts:
+            phl_adc_01:
+              ansible_host: "CHANGE_ME_NSIP"
+              nsip_netmask: "CHANGE_ME_MASK"
+              ha_peer: phl_adc_02
+              hostname: "CHANGE_ME_HOSTNAME"
+            phl_adc_02:
+              ansible_host: "CHANGE_ME_NSIP"
+              nsip_netmask: "CHANGE_ME_MASK"
+              ha_peer: phl_adc_01
+              hostname: "CHANGE_ME_HOSTNAME"

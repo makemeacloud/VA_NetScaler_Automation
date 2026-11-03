@@ -1,0 +1,51 @@
+---
+- name: Set RPC node password for self and peer
+  netscaler.adc.nsrpcnode:
+    nsip: "{{ ansible_host }}"
+    nitro_user: "{{ mpx_nitro_user }}"
+    nitro_pass: "{{ mpx_nitro_pass }}"
+    nitro_protocol: https
+    validate_certs: "{{ mpx_validate_certs }}"
+    state: present
+    ipaddress: "{{ item }}"
+    password: "{{ rpc_node_password }}"
+    secure: "YES"
+  loop: ["{{ ansible_host }}", "{{ hostvars[ha_peer].ansible_host }}"]
+  no_log: true
+
+- name: Add HA peer (id = ha_peer_id, INC from ha_inc_mode)
+  netscaler.adc.hanode:
+    nsip: "{{ ansible_host }}"
+    nitro_user: "{{ mpx_nitro_user }}"
+    nitro_pass: "{{ mpx_nitro_pass }}"
+    nitro_protocol: https
+    validate_certs: "{{ mpx_validate_certs }}"
+    state: present
+    id: "{{ ha_peer_id | int }}"
+    ipaddress: "{{ hostvars[ha_peer].ansible_host }}"
+    inc: "{{ 'ENABLED' if ha_inc_mode | bool else 'DISABLED' }}"
+  no_log: true
+
+# Adopted from netscaler/automation-toolkit events/20230206/step1_configure_ha: CLI prompt shows user@HA-state,
+# so an operator always sees which node is primary before typing a command.
+- name: Set CLI prompt to user@HA-state (%u@%s)
+  netscaler.adc.systemparameter:
+    nsip: "{{ ansible_host }}"
+    nitro_user: "{{ mpx_nitro_user }}"
+    nitro_pass: "{{ mpx_nitro_pass }}"
+    nitro_protocol: https
+    validate_certs: "{{ mpx_validate_certs }}"
+    state: present
+    promptstring: "{{ mpx_promptstring | default('%u@%s') }}"
+  no_log: true
+
+- name: Verify the peer shows up in HA (read-only)
+  ansible.builtin.uri:
+    url: "https://{{ ansible_host }}/nitro/v1/config/hanode"
+    headers: {X-NITRO-USER: "{{ mpx_nitro_user }}", X-NITRO-PASS: "{{ mpx_nitro_pass }}"}
+    validate_certs: "{{ mpx_validate_certs }}"
+  register: mpx_ha_pair_state
+  until: (mpx_ha_pair_state.json.hanode | default([]) | length) >= 2
+  retries: 10
+  delay: 15
+  no_log: true

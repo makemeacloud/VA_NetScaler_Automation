@@ -1,0 +1,26 @@
+---
+# UNVERIFIED endpoint: /nitro/v2/upload/xen_nsvpx_image (multipart). Confirm on your MS build.
+- name: List images already on the SDX
+  ansible.builtin.uri:
+    url: "{{ nitro_base }}/config/xen_nsvpx_image"
+    headers: "{{ nitro_headers }}"
+    validate_certs: "{{ nitro_validate_certs }}"
+  register: sdx_image_upload_list
+  delegate_to: localhost
+
+- name: Upload XVA image if missing
+  ansible.builtin.uri:
+    url: "{{ nitro_base }}/upload/xen_nsvpx_image"
+    method: POST
+    headers:
+      X-NITRO-USER: "{{ sdx_ms_user }}"
+      X-NITRO-PASS: "{{ sdx_ms_password }}"
+    body_format: form-multipart
+    body:
+      file:
+        filename: "{{ vpx_xva_local_path }}"
+    validate_certs: "{{ nitro_validate_certs }}"
+    timeout: 3600
+  when: vpx_xva_name not in (sdx_image_upload_list.json.xen_nsvpx_image | default([]) | map(attribute='file_name') | list)
+  delegate_to: localhost
+  no_log: true

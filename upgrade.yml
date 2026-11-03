@@ -1,0 +1,117 @@
+---
+# Firmware upgrade for MPX/ADC nodes (standalone or HA pair). Adapted from netscaler/automation-toolkit
+# golden_templates/upgrade-netscaler (high-availability normal-mode + issu-mode, standalone) - see README.
+# Run:  ansible-playbook -i inventories/example/sites.yml upgrade.yml --ask-vault-pass \
+#         -e upgrade_confirm=true -e upgrade_target_version=14.1-51.80 \
+#         -e upgrade_build_url=file:///var/nsinstall/build-14.1-51.80_nc_64.tgz [-e upgrade_mode=issu] [--limit site_cle]
+# Order per HA pair: secondary -> (ISSU: migrate | normal: failover) -> old primary -> failover back.
+- name: Upgrade precheck
+  hosts: adc_sites
+  gather_facts: false
+  connection: local
+  vars_files: [upgrade_vars.yml]
+  tasks:
+    - name: Explicit confirmation and inputs
+      ansible.builtin.assert:
+        that:
+          - upgrade_confirm | default(false) | bool
+          - upgrade_mode in ['normal', 'issu']
+          - upgrade_target_version is match('^\d+\.\d+-\d+\.\d+$')
+          - upgrade_build_url | length > 0 and 'CHANGE_ME' not in upgrade_build_url
+          - platform == 'mpx'
+          - "'CHANGE_ME' not in ansible_host ~ mpx_nitro_user ~ mpx_nitro_pass"
+        fail_msg: >-
+          {{ inventory_hostname }}: upgrade needs -e upgrade_confirm=true, upgrade_target_version (R.r-B.b),
+          upgrade_build_url, platform mpx (SDX/VPX use the SDX bundle path) and no placeholders.
+
+    - name: Target is 14.1-51.80 or newer (LAS floor)
+      vars:
+        t: "{{ upgrade_target_version | regex_findall('\\d+') | map('int') | list }}"
+      ansible.builtin.assert:
+        that: (t[0], t[1], t[2], t[3]) >= (14, 1, 51, 80)
+        fail_msg: "Target {{ upgrade_target_version }} is below 14.1-51.80 (needed for LAS)."
+
+    - name: FIPS sites - target must be on the approved FIPS build list and be a FIPS image
+      ansible.builtin.assert:
+        that:
+          - mpx_fips_approved_builds | select('search', upgrade_target_version | regex_escape) | list | length > 0
+          - "'fips' in upgrade_build_url | lower"
+        fail_msg: "{{ site_name }} is FIPS: {{ upgrade_target_version }} not in mpx_fips_approved_builds or image not FIPS."
+      when: fips_required | bool
+
+    - name: Non-FIPS sites - target on approved list
+      ansible.builtin.assert:
+        that: mpx_non_fips_approved_builds | select('search', upgrade_target_version | regex_escape) | list | length > 0
+        fail_msg: "{{ upgrade_target_version }} is not in mpx_non_fips_approved_builds."
+      when: not (fips_required | bool)
+
+    - name: Read HA state
+      ansible.builtin.uri:
+        url: "https://{{ ansible_host }}/nitro/v1/config/hanode"
+        headers: {X-NITRO-USER: "{{ mpx_nitro_user }}", X-NITRO-PASS: "{{ mpx_nitro_pass }}"}
+        validate_certs: "{{ mpx_validate_certs }}"
+      register: upg_ha
+      no_log: true
+
+    - name: Role of this node
+      vars:
+        nodes: "{{ upg_ha.json.hanode | default([]) }}"
+        local: "{{ nodes | selectattr('id', 'in', ['0', 0]) | first | default({}) }}"
+      ansible.builtin.set_fact:
+        upg_role: "{{ 'standalone' if nodes | length < 2 else (local.state | default('') | lower) }}"
+        upg_sync: "{{ local.hasync | default('') }}"
+
+    - name: HA pair healthy before upgrade (one primary, one secondary, both seen)
+      ansible.builtin.assert:
+        that:
+          - upg_role in ['primary', 'secondary', 'standalone']
+          - upg_role == 'standalone' or (ha_peer in ansible_play_hosts and
+            [upg_role, hostvars[ha_peer].upg_role] | sort == ['primary', 'secondary'])
+        fail_msg: "{{ site_name }}: HA state {{ upg_role }} / peer {{ hostvars[ha_peer].upg_role | default('?') }} - fix before upgrading."
+
+    - name: Group by role
+      ansible.builtin.group_by: {key: "upg_{{ upg_role }}"}
+
+- name: Upgrade secondaries and standalone nodes
+  hosts: upg_secondary:upg_standalone
+  gather_facts: false
+  connection: local
+  serial: 1
+  vars_files: [upgrade_vars.yml]
+  roles: [upgrade_node]
+  post_tasks:
+    - name: Normal mode - fail over so the upgraded node becomes primary
+      when: upg_role == 'secondary' and upgrade_mode == 'normal'
+      netscaler.adc.hafailover:
+        nsip: "{{ ansible_host }}"
+        nitro_user: "{{ mpx_nitro_user }}"
+        nitro_pass: "{{ mpx_nitro_pass }}"
+        nitro_protocol: https
+        validate_certs: "{{ mpx_validate_certs }}"
+        state: present
+        force: true
+      no_log: true
+
+    - name: Let HA settle
+      when: upg_role == 'secondary'
+      ansible.builtin.pause: {seconds: "{{ upgrade_settle_s }}"}
+
+- name: Upgrade old primaries
+  hosts: upg_primary
+  gather_facts: false
+  connection: local
+  serial: 1
+  vars_files: [upgrade_vars.yml]
+  roles: [upgrade_node]
+  post_tasks:
+    - name: Fail back so the original primary is primary again
+      when: upgrade_failback | bool
+      netscaler.adc.hafailover:
+        nsip: "{{ ansible_host }}"
+        nitro_user: "{{ mpx_nitro_user }}"
+        nitro_pass: "{{ mpx_nitro_pass }}"
+        nitro_protocol: https
+        validate_certs: "{{ mpx_validate_certs }}"
+        state: present
+        force: true
+      no_log: true

@@ -1,0 +1,6 @@
+---
+- name: Pre-check only (no device contact)
+  hosts: sdx
+  gather_facts: false
+  connection: local
+  roles: [precheck]

@@ -1,0 +1,59 @@
+---
+- name: Wait for NSIP ports 443 and 22
+  ansible.builtin.wait_for:
+    host: "{{ ansible_host }}"
+    port: "{{ item }}"
+    timeout: "{{ mpx_wait_timeout_s }}"
+  loop: [443, 22]
+
+- name: Retry NITRO login until the ADC answers
+  ansible.builtin.uri:
+    url: "https://{{ ansible_host }}/nitro/v1/config/login"
+    method: POST
+    body_format: json
+    body:
+      login:
+        username: "{{ mpx_nitro_user }}"
+        password: "{{ mpx_nitro_pass }}"
+    status_code: [200, 201]
+    validate_certs: "{{ mpx_validate_certs }}"
+  register: mpx_wait_ready_login
+  until: mpx_wait_ready_login.status in [200, 201]
+  retries: "{{ mpx_nitro_login_retries }}"
+  delay: 20
+  no_log: true
+
+- name: Read firmware version
+  ansible.builtin.uri:
+    url: "https://{{ ansible_host }}/nitro/v1/config/nsversion"
+    headers:
+      X-NITRO-USER: "{{ mpx_nitro_user }}"
+      X-NITRO-PASS: "{{ mpx_nitro_pass }}"
+    validate_certs: "{{ mpx_validate_certs }}"
+  register: mpx_wait_ready_version
+  no_log: true
+
+- name: Firmware is on the approved list (FIPS image on FIPS models)
+  vars:
+    ver: "{{ mpx_wait_ready_version.json.nsversion.version | default('') }}"
+    approved: "{{ mpx_fips_approved_builds if fips_required | bool else mpx_non_fips_approved_builds }}"
+  ansible.builtin.assert:
+    that:
+      - approved | select('in', ver) | list | length > 0
+      - not (fips_required | bool) or ('FIPS' in ver or 'fips' in ver)
+    fail_msg: "{{ inventory_hostname }} runs '{{ ver }}', not an approved {{ 'FIPS ' if fips_required | bool else '' }}build."
+
+- name: Firmware floor for LAS (14.1-51.80+, FIPS too)
+  ansible.builtin.include_role: {name: fw_version_check}
+  vars:
+    fw_version_check_nsip: "{{ ansible_host }}"
+    fw_version_check_user: "{{ mpx_nitro_user }}"
+    fw_version_check_pass: "{{ mpx_nitro_pass }}"
+    fw_version_check_validate: "{{ mpx_validate_certs }}"
+    fw_version_check_min_release: "14.1"
+    fw_version_check_min_build: "51.80"
+
+- name: Refuse firmware below 14.1-51.80
+  ansible.builtin.assert:
+    that: fw_version_check_ok | bool
+    fail_msg: "{{ inventory_hostname }} runs '{{ fw_version_check_version }}'; LAS needs 14.1-51.80 or newer."

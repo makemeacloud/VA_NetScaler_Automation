@@ -1,0 +1,50 @@
+---
+- name: Set hostname
+  netscaler.adc.nshostname:
+    nsip: "{{ item.nsip }}"
+    nitro_user: "{{ admin_profile_user }}"
+    nitro_pass: "{{ admin_profile_password }}"
+    validate_certs: "{{ nitro_validate_certs }}"
+    state: present
+    hostname: "{{ post_config.hostname_prefix }}-{{ item.name }}"
+  loop: "{{ vpx_instances | selectattr('sdx_host', 'equalto', inventory_hostname) | list }}"
+  loop_control: {label: "{{ item.name }}"}
+  delegate_to: localhost
+  no_log: true
+
+- name: Add NTP servers
+  netscaler.adc.ntpserver:
+    nsip: "{{ item.0.nsip }}"
+    nitro_user: "{{ admin_profile_user }}"
+    nitro_pass: "{{ admin_profile_password }}"
+    validate_certs: "{{ nitro_validate_certs }}"
+    state: present
+    serverip: "{{ item.1 }}"
+  loop: "{{ vpx_instances | selectattr('sdx_host', 'equalto', inventory_hostname) | product(post_config.ntp_servers) | list }}"
+  loop_control: {label: "{{ item.0.name }} {{ item.1 }}"}
+  delegate_to: localhost
+  no_log: true
+
+- name: Add DNS name servers
+  netscaler.adc.dnsnameserver:
+    nsip: "{{ item.0.nsip }}"
+    nitro_user: "{{ admin_profile_user }}"
+    nitro_pass: "{{ admin_profile_password }}"
+    validate_certs: "{{ nitro_validate_certs }}"
+    state: present
+    ip: "{{ item.1 }}"
+  loop: "{{ vpx_instances | selectattr('sdx_host', 'equalto', inventory_hostname) | product(post_config.dns_servers) | list }}"
+  loop_control: {label: "{{ item.0.name }} {{ item.1 }}"}
+  delegate_to: localhost
+  no_log: true
+
+- name: Save config
+  netscaler.adc.save_config:
+    nsip: "{{ item.nsip }}"
+    nitro_user: "{{ admin_profile_user }}"
+    nitro_pass: "{{ admin_profile_password }}"
+    validate_certs: "{{ nitro_validate_certs }}"
+  loop: "{{ vpx_instances | selectattr('sdx_host', 'equalto', inventory_hostname) | list }}"
+  loop_control: {label: "{{ item.name }}"}
+  delegate_to: localhost
+  no_log: true

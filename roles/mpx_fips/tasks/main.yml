@@ -1,0 +1,79 @@
+---
+# MPX 9200 FIPS (14.1-FIPS, cert #5342): NO hardware security module. Per current docs:
+#  - check "show system fipsStatus" == "System is operating in FIPS mode"
+#  - then: strong passwords, replace default TLS cert, GUI HTTPS only, later LDAP + local auth off.
+#  - HA is configured the same as non-FIPS (no FIPS key sync / SIM steps).
+# The old "reset fips / set fips -initHSM / sslfipssim*" flow is MPX 14000 FIPS only and is NOT run here.
+- name: Read FIPS status   # UNVERIFIED NITRO resource name for "show system fipsStatus"
+  ansible.builtin.uri:
+    url: "https://{{ ansible_host }}/nitro/v1/config/systemfipsstatus"
+    headers:
+      X-NITRO-USER: "{{ mpx_nitro_user }}"
+      X-NITRO-PASS: "{{ mpx_nitro_pass }}"
+    validate_certs: "{{ mpx_validate_certs }}"
+    status_code: [200, 404, 599]
+  register: mpx_fips_status
+  no_log: true
+
+- name: Set FIPS gate (true only if the box reports FIPS mode)
+  ansible.builtin.set_fact:
+    mpx_fips_ready: "{{ (mpx_fips_status.json | default({}) | to_json) is search('operating in FIPS mode') }}"
+
+- name: Stop if FIPS mode is not confirmed
+  ansible.builtin.assert:
+    that: mpx_fips_ready | bool
+    fail_msg: >-
+      {{ inventory_hostname }}: FIPS mode not confirmed over NITRO. SSH in and run
+      "show system fipsStatus". If it says non FIPS mode, check the license. Nothing else will run.
+
+- name: Enforce strong passwords
+  netscaler.adc.systemparameter:
+    nsip: "{{ ansible_host }}"
+    nitro_user: "{{ mpx_nitro_user }}"
+    nitro_pass: "{{ mpx_nitro_pass }}"
+    nitro_protocol: https
+    validate_certs: "{{ mpx_validate_certs }}"
+    state: present
+    strongpassword: enableall
+  when: fips_hardening | bool
+  no_log: true
+
+- name: GUI over HTTPS only on the NSIP
+  netscaler.adc.nsip:
+    nsip: "{{ ansible_host }}"
+    nitro_user: "{{ mpx_nitro_user }}"
+    nitro_pass: "{{ mpx_nitro_pass }}"
+    nitro_protocol: https
+    validate_certs: "{{ mpx_validate_certs }}"
+    state: present
+    ipaddress: "{{ ansible_host }}"
+    netmask: "{{ nsip_netmask }}"
+    gui: SECUREONLY
+  when: fips_hardening | bool
+  no_log: true
+
+- name: Lockout guard - confirmations required before disabling local auth
+  ansible.builtin.assert:
+    that:
+      - nsroot_console_verified | default(false) | bool
+      - ldap_admin_login_verified | default(false) | bool
+    fail_msg: >-
+      fips_disable_local_auth is true, but disabling local auth could lock you out. Confirm nsroot logs in
+      from the console (nsroot_console_verified: true) and an LDAP admin logs in (ldap_admin_login_verified: true).
+  when: fips_disable_local_auth | default(false) | bool
+
+- name: Disable local auth (only after LDAP admin login works)
+  netscaler.adc.systemparameter:
+    nsip: "{{ ansible_host }}"
+    nitro_user: "{{ mpx_nitro_user }}"
+    nitro_pass: "{{ mpx_nitro_pass }}"
+    nitro_protocol: https
+    validate_certs: "{{ mpx_validate_certs }}"
+    state: present
+    localauth: disabled
+  when: fips_disable_local_auth | bool
+  no_log: true
+
+- name: Reminder - replace the default ns-server certificate
+  ansible.builtin.debug:
+    msg: "Replace default ns-server.cert/key with a CA-signed cert (docs step 2). Not automated yet."

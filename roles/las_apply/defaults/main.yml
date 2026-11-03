@@ -1,0 +1,16 @@
+---
+# Adapted from netscaler/automation-toolkit Examples/Offline_LAS_Licensing/ansible_collections_netscaleradc
+# (module netscaler.adc.nslaslicense_offline). See README "Attribution".
+las_apply_mode: offline                # offline = nslaslicense_offline (request pkg -> LAS cloud -> blob -> apply)
+                                 # blob    = apply a blob already on /nsconfig/license (nslaslicense state: applied)
+las_apply_restricted_mode: false       # true = send only lsid/pubkey to LAS (no package upload)
+las_apply_nitro_user: nsroot           # module requires nsroot
+las_apply_min_release: "14.1"
+las_apply_min_build: "51.80"           # 14.1-51.80+ on every LAS path, FIPS included
+las_apply_endpoint: "https://las.cloud.com"
+las_apply_cc_endpoint: "https://trust.citrixworkspacesapi.net/root/tokens/clients"
+# secrets file is written here (0600) and deleted; the module itself writes
+# offline_token_<nsip>_activation.blob.tgz to the current directory (gitignored)
+las_apply_blob_dir: "{{ playbook_dir }}/.las_blobs"
+las_apply_wait_timeout_s: 900
+las_apply_login_retries: 45

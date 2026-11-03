@@ -1,0 +1,28 @@
+---
+- name: Read license state (read-only)
+  ansible.builtin.uri:
+    url: "https://{{ ansible_host }}/nitro/v1/config/nslicense"
+    headers:
+      X-NITRO-USER: "{{ mpx_nitro_user }}"
+      X-NITRO-PASS: "{{ mpx_nitro_pass }}"
+    validate_certs: "{{ mpx_validate_certs }}"
+  register: mpx_license_state
+  no_log: true
+
+- name: LAS not requested
+  ansible.builtin.debug:
+    msg: "{{ inventory_hostname }}: LAS skipped (set las_apply: true). Box will warm-reboot when it runs."
+  when: not (las_apply | default(false) | bool)
+
+- name: Automated LAS (gated, reboots the box)
+  ansible.builtin.include_role:
+    name: las_apply
+  when: las_apply | default(false) | bool
+  vars:
+    las_apply_target_nsip: "{{ ansible_host }}"
+    las_apply_target_pass: "{{ vault_mpx_nsroot_password }}"
+    las_apply_entitlement: "{{ las_entitlement_name | default('') }}"
+    # Upstream README: is_fips is for FIPS VPX only; FIPS MPX uses false. Override only if LAS requires it.
+    las_apply_is_fips: "{{ las_is_fips_override | default(false) }}"
+    las_apply_validate_certs: "{{ mpx_validate_certs }}"
+    las_apply_label: "{{ inventory_hostname }}"

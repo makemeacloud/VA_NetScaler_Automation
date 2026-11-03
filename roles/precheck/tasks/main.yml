@@ -1,0 +1,105 @@
+---
+- name: Fail if any CHANGE_ME placeholder is left
+  ansible.builtin.assert:
+    that: "'CHANGE_ME' not in (vpx_instances | to_json) and 'CHANGE_ME' not in ansible_host"
+    fail_msg: "Placeholders still present. Fill in the inventory first."
+  run_once: true
+
+- name: Require model-specific reserved memory for this SDX (no default)
+  ansible.builtin.assert:
+    that:
+      - sdx_reserved_memory_gb is defined
+      - sdx_reserved_memory_gb[inventory_hostname] is defined
+      - (sdx_reserved_memory_gb[inventory_hostname] | float) > 0
+    fail_msg: >-
+      sdx_reserved_memory_gb for {{ inventory_hostname }} is 0 or unset. It is model-dependent
+      (Management Service + Dom0). Look it up for your SDX model and set it.
+
+- name: Check each instance's own settings
+  ansible.builtin.assert:
+    that:
+      - item.packet_engines > 0
+      - item.memory_gb >= item.packet_engines * memory_per_packet_engine_gb
+      - item.cpu_core_sharing in ['dedicated', 'shared']
+      - item.license_edition in ['Standard', 'Advanced', 'Premium']
+      - item.throughput_mbps > 0
+      - item.interfaces | length > 0
+      - item.interfaces | rejectattr('vlan_filtering', 'equalto', true) | list | length == 0
+      - item.interfaces | selectattr('allowed_vlans', 'undefined') | list | length == 0
+    fail_msg: >-
+      {{ item.name }}: needs memory >= {{ item.packet_engines * memory_per_packet_engine_gb }} GB,
+      cpu_core_sharing dedicated|shared, a license edition, throughput > 0, and interfaces with
+      vlan_filtering true plus allowed_vlans.
+  loop: "{{ vpx_instances }}"
+  loop_control: {label: "{{ item.name }}"}
+  run_once: true
+
+- name: Sum memory, SSL cores and throughput on this SDX
+  ansible.builtin.set_fact:
+    precheck_mine: "{{ vpx_instances | selectattr('sdx_host', 'equalto', inventory_hostname) | list }}"
+
+- name: Compute memory total on this SDX
+  ansible.builtin.set_fact:
+    precheck_mem_total: "{{ (precheck_mine | map(attribute='memory_gb') | sum) + (sdx_reserved_memory_gb[inventory_hostname] | float) }}"
+
+- name: Show this SDX's totals
+  ansible.builtin.debug:
+    msg:
+      memory_gb: "{{ precheck_mem_total }} of {{ sdx_capacity[inventory_hostname].memory_gb }}"
+      ssl_cores: "{{ precheck_mine | map(attribute='ssl_cores') | sum }} of {{ sdx_capacity[inventory_hostname].ssl_cores }}"
+      throughput_mbps: "{{ precheck_mine | map(attribute='throughput_mbps') | sum }} of {{ sdx_platform_throughput_mbps[inventory_hostname] }}"
+
+- name: Memory fits this SDX (instances + reserved)
+  ansible.builtin.assert:
+    that: "(precheck_mem_total | float) <= sdx_capacity[inventory_hostname].memory_gb"
+    fail_msg: "{{ inventory_hostname }}: memory oversubscribed."
+
+- name: SSL cores fit this SDX's SSL core pool (sum of all instances on the box)
+  ansible.builtin.assert:
+    that: "(precheck_mine | map(attribute='ssl_cores') | sum) <= sdx_capacity[inventory_hostname].ssl_cores"
+    fail_msg: >-
+      {{ inventory_hostname }}: instances ask for {{ precheck_mine | map(attribute='ssl_cores') | sum }}
+      SSL cores, pool has {{ sdx_capacity[inventory_hostname].ssl_cores }}.
+
+- name: Throughput fits this SDX's platform license
+  ansible.builtin.assert:
+    that:
+      - (sdx_platform_throughput_mbps[inventory_hostname] | int) > 0
+      - (precheck_mine | map(attribute='throughput_mbps') | sum) <= (sdx_platform_throughput_mbps[inventory_hostname] | int)
+    fail_msg: >-
+      {{ inventory_hostname }}: instances need {{ precheck_mine | map(attribute='throughput_mbps') | sum }} Mbps,
+      platform license is {{ sdx_platform_throughput_mbps[inventory_hostname] | default(0) }} Mbps (must be set and > 0).
+
+- name: Check HA pairs (separate boxes, matching settings, peer id, INC vs subnets)
+  vars:
+    nodes: "{{ vpx_instances | selectattr('ha_pair', 'equalto', item) | list }}"
+    net_a: "{{ (nodes[0].nsip ~ '/' ~ nodes[0].netmask) | ansible.utils.ipaddr('network/prefix') }}"
+    net_b: "{{ (nodes[1].nsip ~ '/' ~ nodes[1].netmask) | ansible.utils.ipaddr('network/prefix') }}"
+  ansible.builtin.assert:
+    that:
+      - nodes | length == 2
+      - nodes[0].sdx_host != nodes[1].sdx_host
+      - nodes[0].packet_engines == nodes[1].packet_engines
+      - nodes[0].memory_gb == nodes[1].memory_gb
+      - nodes[0].ssl_cores == nodes[1].ssl_cores
+      - nodes[0].throughput_mbps == nodes[1].throughput_mbps
+      - nodes[0].license_edition == nodes[1].license_edition
+      - nodes[0].cpu_core_sharing == nodes[1].cpu_core_sharing
+      - nodes[0].ha_peer_id == nodes[1].ha_peer_id
+      - (nodes[0].ha_peer_id | int) >= 1 and (nodes[0].ha_peer_id | int) <= 64
+      - ha_inc_mode | bool or net_a == net_b
+    fail_msg: >-
+      HA pair {{ item }}: nodes must be on separate SDX boxes with matching size, throughput, edition,
+      CPU core sharing and ha_peer_id (1-64). Subnets {{ net_a }} / {{ net_b }}: if different, set ha_inc_mode true.
+  loop: "{{ vpx_instances | selectattr('ha_pair', 'defined') | map(attribute='ha_pair') | unique | list }}"
+  run_once: true
+
+- name: Check image build is LAS-capable (14.1-51.80 or newer)
+  vars:
+    build: "{{ vpx_xva_name | regex_search('(\\d+)\\.(\\d+)-(\\d+)\\.(\\d+)', '\\1', '\\2', '\\3', '\\4') | default([], true) | map('int') | list }}"
+  ansible.builtin.assert:
+    that:
+      - build | length == 4
+      - (build[0], build[1], build[2], build[3]) >= (14, 1, 51, 80)
+    fail_msg: "Image {{ vpx_xva_name }} is older than 14.1-51.80 (or has no R.r-B.b in its name); LAS will not work."
+  run_once: true

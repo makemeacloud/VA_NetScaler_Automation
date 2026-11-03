@@ -1,0 +1,29 @@
+---
+- name: Wait for NSIP HTTPS and SSH ports
+  ansible.builtin.wait_for:
+    host: "{{ item.0.nsip }}"
+    port: "{{ item.1 }}"
+    timeout: "{{ vpx_wait_timeout_s }}"
+  loop: "{{ vpx_instances | selectattr('sdx_host', 'equalto', inventory_hostname) | product([443, 22]) | list }}"
+  loop_control: {label: "{{ item.0.name }}:{{ item.1 }}"}
+  delegate_to: localhost
+
+- name: Retry NITRO login until the VPX answers
+  ansible.builtin.uri:
+    url: "https://{{ item.nsip }}/nitro/v1/config/login"
+    method: POST
+    body_format: json
+    body:
+      login:
+        username: "{{ admin_profile_user }}"
+        password: "{{ admin_profile_password }}"
+    status_code: [200, 201]
+    validate_certs: "{{ nitro_validate_certs }}"
+  register: vpx_wait_ready_login
+  until: vpx_wait_ready_login.status in [200, 201]
+  retries: "{{ vpx_nitro_login_retries }}"
+  delay: 20
+  loop: "{{ vpx_instances | selectattr('sdx_host', 'equalto', inventory_hostname) | list }}"
+  loop_control: {label: "{{ item.name }}"}
+  delegate_to: localhost
+  no_log: true

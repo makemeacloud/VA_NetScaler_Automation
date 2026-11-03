@@ -1,0 +1,115 @@
+---
+# One device. Inputs: las_apply_target_nsip, las_apply_target_pass, las_apply_entitlement, las_apply_is_fips, las_apply_validate_certs,
+# las_apply_label. Gated by las_apply. Reboots the box (warm) -> waits until NITRO answers again.
+- name: LAS gate
+  ansible.builtin.assert:
+    that:
+      - las_apply_mode in ['offline', 'blob']
+      - las_apply_entitlement is defined and las_apply_entitlement | length > 0 and 'CHANGE_ME' not in las_apply_entitlement
+      - las_apply_mode == 'blob' or (vault_las_ccid is defined and vault_las_client_id is defined
+        and vault_las_client_secret is defined)
+    fail_msg: >-
+      {{ las_apply_label }}: set las_apply_mode, las_entitlement_name (exact LAS entitlement, e.g. "FIPS MPX 92xx Premium")
+      and vault_las_ccid / vault_las_client_id / vault_las_client_secret in the vault.
+
+- name: Firmware is 14.1-51.80 or newer (required for LAS)
+  ansible.builtin.include_role:
+    name: fw_version_check
+  vars:
+    fw_version_check_nsip: "{{ las_apply_target_nsip }}"
+    fw_version_check_user: "{{ las_apply_nitro_user }}"
+    fw_version_check_pass: "{{ las_apply_target_pass }}"
+    fw_version_check_validate: "{{ las_apply_validate_certs }}"
+    fw_version_check_min_release: "{{ las_apply_min_release }}"
+    fw_version_check_min_build: "{{ las_apply_min_build }}"
+
+- name: Refuse LAS on old firmware
+  ansible.builtin.assert:
+    that: fw_version_check_ok | bool
+    fail_msg: "{{ las_apply_label }} runs '{{ fw_version_check_version }}'; LAS needs {{ las_apply_min_release }}-{{ las_apply_min_build }}+."
+
+- name: Offline LAS
+  when: las_apply_mode == 'offline'
+  delegate_to: localhost
+  block:
+    - name: Blob directory on the control node
+      ansible.builtin.file: {path: "{{ las_apply_blob_dir }}", state: directory, mode: "0700"}
+
+    - name: Write LAS secrets file from vault (0600, removed afterwards)
+      ansible.builtin.copy:
+        dest: "{{ las_apply_blob_dir }}/las_secrets_{{ las_apply_label }}.json"
+        mode: "0600"
+        content: "{{ {'ccid': vault_las_ccid, 'client': vault_las_client_id, 'password': vault_las_client_secret,
+                      'las_apply_endpoint': las_apply_endpoint, 'cc_endpoint': las_apply_cc_endpoint} | to_json }}"
+      no_log: true
+
+    - name: Apply offline LAS license (box warm-reboots)
+      netscaler.adc.nslaslicense_offline:
+        nsip: "{{ las_apply_target_nsip }}"
+        nitro_user: "{{ las_apply_nitro_user }}"
+        nitro_pass: "{{ las_apply_target_pass }}"
+        nitro_protocol: https
+        validate_certs: "{{ las_apply_validate_certs }}"
+        entitlement_name: "{{ las_apply_entitlement }}"
+        is_fips: "{{ las_apply_is_fips | bool }}"
+        las_secrets_json: "{{ las_apply_blob_dir }}/las_secrets_{{ las_apply_label }}.json"
+        restricted_mode: "{{ las_apply_restricted_mode | bool }}"
+      register: las_apply_result
+      no_log: true
+  always:
+    - name: Remove LAS secrets file
+      ansible.builtin.file: {path: "{{ las_apply_blob_dir }}/las_secrets_{{ las_apply_label }}.json", state: absent}
+      delegate_to: localhost
+
+- name: Apply LAS blob already on the box (/nsconfig/license)
+  when: las_apply_mode == 'blob'
+  netscaler.adc.nslaslicense:
+    nsip: "{{ las_apply_target_nsip }}"
+    nitro_user: "{{ las_apply_nitro_user }}"
+    nitro_pass: "{{ las_apply_target_pass }}"
+    nitro_protocol: https
+    validate_certs: "{{ las_apply_validate_certs }}"
+    state: applied
+    filename: "{{ las_apply_blob_filename }}"
+    filelocation: "/nsconfig/license"
+  register: las_apply_result
+  delegate_to: localhost
+  no_log: true
+
+- name: LAS result (log lines only)
+  ansible.builtin.debug:
+    msg: "{{ las_apply_label }}: changed={{ las_apply_result.changed | default(false) }} {{ las_apply_result.loglines | default([]) | last | default('') }}"
+
+- name: Wait for reboot to start, then for NITRO login  # noqa: no-handler
+  when: las_apply_result.changed | default(false)
+  delegate_to: localhost
+  block:
+    - name: Give the warm reboot time to start
+      ansible.builtin.pause: {seconds: 60}
+
+    - name: Retry NITRO login until the box answers
+      ansible.builtin.uri:
+        url: "https://{{ las_apply_target_nsip }}/nitro/v1/config/login"
+        method: POST
+        body_format: json
+        body: {login: {username: "{{ las_apply_nitro_user }}", password: "{{ las_apply_target_pass }}"}}
+        status_code: [200, 201]
+        validate_certs: "{{ las_apply_validate_certs }}"
+      register: las_apply_wait
+      until: las_apply_wait.status | default(0) in [200, 201]
+      retries: "{{ las_apply_login_retries }}"
+      delay: 20
+      no_log: true
+
+    - name: Read license state after reboot
+      ansible.builtin.uri:
+        url: "https://{{ las_apply_target_nsip }}/nitro/v1/config/nslicense"
+        headers: {X-NITRO-USER: "{{ las_apply_nitro_user }}", X-NITRO-PASS: "{{ las_apply_target_pass }}"}
+        validate_certs: "{{ las_apply_validate_certs }}"
+      register: las_apply_after
+      no_log: true
+
+    - name: Show licensed edition
+      ansible.builtin.debug:
+        msg: "{{ las_apply_label }}: {{ las_apply_after.json.nslicense | default({}) | dict2items | selectattr('value', 'equalto', true)
+              | map(attribute='key') | list | length }} features licensed; check 'show license' / LAS expiry trap."

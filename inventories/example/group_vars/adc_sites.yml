@@ -1,0 +1,39 @@
+---
+# ============ EXAMPLE VARS for the bare-metal MPX track - PLACEHOLDERS ONLY ============
+# Secrets go in ansible-vault: vault_mpx_nsroot_password, vault_rpc_node_password.
+mpx_nitro_user: "CHANGE_ME"
+mpx_nitro_pass: "{{ vault_mpx_nsroot_password | default('CHANGE_ME') }}"
+mpx_validate_certs: true
+rpc_node_password: "{{ vault_rpc_node_password | default('CHANGE_ME') }}"
+
+# Firmware: MPX 9200 FIPS must run 14.1-FIPS (separate image). Put the exact approved build here.
+mpx_fips_approved_builds: ["CHANGE_ME"]   # e.g. the build string from "show version", agreed with ATO team
+mpx_non_fips_approved_builds: ["CHANGE_ME"]   # for MPX 17000 if chosen
+
+# Optional first-boot step: move NSIP from the console/bootstrap address to the final one.
+mpx_set_nsip: false
+mpx_bootstrap_ip: "CHANGE_ME"   # only used when mpx_set_nsip is true
+
+mpx_ntp_servers: ["CHANGE_ME_NTP"]
+mpx_dns_servers: ["CHANGE_ME_DNS"]
+mpx_wait_timeout_s: 900
+mpx_nitro_login_retries: 30
+
+# FIPS (MPX 9200 FIPS). There is NO HSM on this model; see NOTES-unverified.md.
+fips_hardening: true              # strong passwords + GUI SECUREONLY (from MPX FIPS docs)
+fips_disable_local_auth: false    # only after LDAP admin login is tested (docs step 4)
+# Operator confirmations, both required before local auth can be disabled:
+nsroot_console_verified: false     # set true only after nsroot login works from the serial/LOM console
+ldap_admin_login_verified: false   # set true only after an LDAP admin account logs in (GUI + SSH)
+# Legacy HSM init (MPX/SDX 14000 FIPS only). Destructive. Refused on mpx9200fips.
+fips_hsm_init_confirm: "NO"       # must be exactly "ERASE-FIPS-HSM" to even be considered
+# SSL key import is blocked until the FIPS gate passes
+mpx_ssl_certkeys: []              # list of {certkey, cert, key}; files already on /nsconfig/ssl
+
+# LAS licensing (roles/las_apply). Gated: nothing happens unless las_apply: true. Box warm-reboots.
+# Vault (never in repo): vault_las_ccid (Citrix Cloud customer ID), vault_las_client_id, vault_las_client_secret,
+# vault_mpx_nsroot_password (module must log in as nsroot).
+las_apply: false
+las_apply_mode: offline                 # offline | blob
+las_entitlement_name: "CHANGE_ME"   # exact name from the LAS account; FIPS MPX: "FIPS MPX 92... Premium"
+# las_is_fips_override: true      # default false on MPX (FIPS MPX too); is_fips is for FIPS VPX only

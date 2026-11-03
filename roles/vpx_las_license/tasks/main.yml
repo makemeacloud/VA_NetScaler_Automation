@@ -1,0 +1,33 @@
+---
+# Runs against each VPX NSIP (ADC NITRO v1), not the SDX MS. Per instance: las_entitlement_name, optional is_fips.
+- name: Show LAS license state on the VPX
+  ansible.builtin.uri:
+    url: "https://{{ item.nsip }}/nitro/v1/config/nslicense"
+    headers:
+      X-NITRO-USER: "{{ admin_profile_user }}"
+      X-NITRO-PASS: "{{ admin_profile_password }}"
+    validate_certs: "{{ nitro_validate_certs }}"
+  loop: "{{ vpx_instances | selectattr('sdx_host', 'equalto', inventory_hostname) | list }}"
+  loop_control: {label: "{{ item.name }}"}
+  register: vpx_las_license_state
+  delegate_to: localhost
+  no_log: true
+
+- name: LAS not requested
+  ansible.builtin.debug:
+    msg: "LAS skipped (set las_apply: true). Each VPX warm-reboots when it runs."
+  when: not (las_apply | default(false) | bool)
+
+- name: Automated LAS per VPX (gated, one at a time, reboots each VPX)
+  ansible.builtin.include_role:
+    name: las_apply
+  when: las_apply | default(false) | bool
+  loop: "{{ vpx_instances | selectattr('sdx_host', 'equalto', inventory_hostname) | list }}"
+  loop_control: {loop_var: vpx, label: "{{ vpx.name }}"}
+  vars:
+    las_apply_target_nsip: "{{ vpx.nsip }}"
+    las_apply_target_pass: "{{ vault_vpx_nsroot_password }}"
+    las_apply_entitlement: "{{ vpx.las_entitlement_name | default('') }}"
+    las_apply_is_fips: "{{ vpx.is_fips | default(false) }}"
+    las_apply_validate_certs: "{{ nitro_validate_certs }}"
+    las_apply_label: "{{ vpx.name }}"

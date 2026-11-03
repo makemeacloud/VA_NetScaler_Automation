@@ -1,0 +1,2 @@
+paramiko>=3.0   # SFTP for netscaler.adc.nslaslicense_offline
+requests

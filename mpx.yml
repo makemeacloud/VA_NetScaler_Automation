@@ -1,0 +1,32 @@
+---
+# Bare-metal MPX track. Run: ansible-playbook -i inventories/example/sites.yml mpx.yml
+- name: Sort ADC nodes by platform
+  hosts: adc_sites
+  gather_facts: false
+  connection: local
+  tags: [always]
+  tasks:
+    - name: Group by platform
+      ansible.builtin.group_by:
+        key: "platform_{{ platform | regex_replace('[^a-z]', '_') }}"
+
+    - name: Warn about sites whose platform is still open (skipped by this playbook)
+      ansible.builtin.debug:
+        msg: "{{ site_name }}: platform '{{ platform }}' not decided - skipped. sdx sites use site.yml."
+      when: platform != 'mpx'
+
+- name: MPX build
+  hosts: platform_mpx
+  gather_facts: false
+  connection: local
+  serial: 2   # one site pair at a time when hosts are listed in site order
+  roles:
+    - {role: mpx_precheck, tags: [precheck]}
+    - {role: mpx_bootstrap, tags: [bootstrap]}
+    - {role: mpx_wait_ready, tags: [wait, always_wait]}
+    - {role: mpx_base, tags: [base]}
+    - {role: mpx_fips, tags: [fips], when: fips_required | bool}
+    - {role: mpx_ha_pair, tags: [ha]}
+    - {role: mpx_license, tags: [license]}
+    - {role: mpx_ssl_keys, tags: [sslkeys]}
+    - {role: mpx_save, tags: [save]}

@@ -1,0 +1,14 @@
+---
+- name: NetScaler SDX VPX build
+  hosts: sdx
+  gather_facts: false
+  connection: local
+  roles:
+    - {role: precheck, tags: [precheck]}
+    - {role: sdx_image_upload, tags: [image]}
+    - {role: sdx_admin_profile, tags: [profile]}
+    - {role: vpx_provision, tags: [provision]}
+    - {role: vpx_wait_ready, tags: [wait, provision, ha, postconfig]}
+    - {role: vpx_las_license, tags: [license]}
+    - {role: vpx_ha_pair, tags: [ha]}
+    - {role: vpx_post_config, tags: [postconfig]}

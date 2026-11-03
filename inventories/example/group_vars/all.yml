@@ -1,0 +1,106 @@
+---
+# ===================== EXAMPLE VARS - PLACEHOLDERS ONLY =====================
+# Nothing here is a real value. Fill in from Jerry / the architects.
+# Secrets: put them in an ansible-vault file, never in plain text.
+
+nitro_protocol: https
+nitro_validate_certs: true
+
+# Per-SDX Management Service login (vault these)
+sdx_ms_user: "CHANGE_ME"
+sdx_ms_password: "{{ vault_sdx_ms_password | default('CHANGE_ME') }}"
+
+# SDX hardware facts used by precheck (from datasheet / MS GUI)
+sdx_capacity:
+  sdx-a: {memory_gb: 0, cpu_cores: 0, ssl_cores: 0}   # CHANGE_ME
+  sdx-b: {memory_gb: 0, cpu_cores: 0, ssl_cores: 0}   # CHANGE_ME
+sdx_reserved_memory_gb:   # CHANGE_ME: required, model-dependent (MS + Dom0). Precheck fails if 0/unset.
+  sdx-a: 0
+  sdx-b: 0
+# Platform (box) license throughput per SDX, in Mbps. Sum of instance throughput must fit.
+sdx_platform_throughput_mbps:
+  sdx-a: 0   # CHANGE_ME
+  sdx-b: 0   # CHANGE_ME
+# HA: RPC node password (same on both nodes) and INC mode (needed if nodes are on different subnets)
+rpc_node_password: "{{ vault_rpc_node_password | default('CHANGE_ME') }}"
+ha_inc_mode: false   # CHANGE_ME if pair spans subnets
+# Wait for VPX after provisioning
+vpx_wait_timeout_s: 900
+vpx_nitro_login_retries: 30
+
+# VPX image on the control node, uploaded to every SDX
+vpx_xva_local_path: "CHANGE_ME/NSVPX-XEN-<rel>-<build>_nc_64.xva"
+vpx_xva_name: "NSVPX-XEN-<rel>-<build>_nc_64.xva"
+vpx_min_build_for_las: "14.1-51.80"
+
+# Admin (device) profile for the instances
+admin_profile_name: "CHANGE_ME_profile"
+admin_profile_user: "CHANGE_ME"
+admin_profile_password: "{{ vault_admin_profile_password | default('CHANGE_ME') }}"
+
+memory_per_packet_engine_gb: 4   # doc guidance
+
+# LAS licensing
+las_apply_mode: offline   # offline | blob (roles/las_apply)
+
+# VPX instances. ha_pair links two nodes; they must be on different SDX boxes.
+vpx_instances:
+  - name: "CHANGE_ME_vpx1"
+    sdx_host: sdx-a
+    nsip: "CHANGE_ME_IP"
+    netmask: "CHANGE_ME_MASK"
+    gateway: "CHANGE_ME_GW"
+    packet_engines: 0      # CHANGE_ME
+    memory_gb: 0           # CHANGE_ME, >= packet_engines * 4
+    ssl_cores: 0           # CHANGE_ME
+    throughput_mbps: 0     # CHANGE_ME (must match license)
+    license_edition: "CHANGE_ME"   # Standard | Advanced | Premium
+    las_entitlement_name: "CHANGE_ME"   # exact LAS name, e.g. "VPX 10000 Premium"; FIPS VPX: add is_fips: true
+    cpu_core_sharing: "CHANGE_ME"  # dedicated | shared
+    interfaces:   # allowed interfaces for this instance
+      - port_name: "CHANGE_ME_PORT"
+        vlan_filtering: true
+        allowed_vlans: ["CHANGE_ME_VLAN"]
+    ha_pair: "CHANGE_ME_pair1"
+    ha_peer_id: 0          # CHANGE_ME: 1-64, same value on both nodes (hanode id of the peer entry)
+  - name: "CHANGE_ME_vpx2"
+    sdx_host: sdx-b
+    nsip: "CHANGE_ME_IP"
+    netmask: "CHANGE_ME_MASK"
+    gateway: "CHANGE_ME_GW"
+    packet_engines: 0
+    memory_gb: 0
+    ssl_cores: 0
+    throughput_mbps: 0
+    license_edition: "CHANGE_ME"   # Standard | Advanced | Premium
+    las_entitlement_name: "CHANGE_ME"   # exact LAS name, e.g. "VPX 10000 Premium"; FIPS VPX: add is_fips: true
+    cpu_core_sharing: "CHANGE_ME"  # dedicated | shared
+    interfaces:   # allowed interfaces for this instance
+      - port_name: "CHANGE_ME_PORT"
+        vlan_filtering: true
+        allowed_vlans: ["CHANGE_ME_VLAN"]
+    ha_pair: "CHANGE_ME_pair1"
+    ha_peer_id: 0          # CHANGE_ME
+
+# Basic post-config pushed to every VPX
+post_config:
+  hostname_prefix: "CHANGE_ME"
+  ntp_servers: ["CHANGE_ME_NTP"]
+  dns_servers: ["CHANGE_ME_DNS"]
+  snmp_trap_destination: "CHANGE_ME"   # LAS expiry traps go here
+
+# Used only by scripts/sdx_nitro.py (Ansible uses hosts.yml)
+sdx_hosts:
+  sdx-a: "CHANGE_ME_SDX_A_MGMT_IP"
+  sdx-b: "CHANGE_ME_SDX_B_MGMT_IP"
+
+# Shared NITRO settings for the SDX Management Service
+nitro_base: "{{ nitro_protocol }}://{{ ansible_host }}/nitro/v2"
+nitro_headers:
+  X-NITRO-USER: "{{ sdx_ms_user }}"
+  X-NITRO-PASS: "{{ sdx_ms_password }}"
+  Content-Type: application/json
+
+# VPX LAS: per instance set las_entitlement_name (e.g. "VPX 10000 Premium") and optional is_fips.
+# Vault: vault_vpx_nsroot_password, vault_las_ccid, vault_las_client_id, vault_las_client_secret.
+las_apply: false

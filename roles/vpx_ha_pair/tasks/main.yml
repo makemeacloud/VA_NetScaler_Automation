@@ -1,0 +1,38 @@
+---
+# Official netscaler.adc collection against each VPX NSIP.
+# Order: RPC password on both nodes -> add HA peer (with INC) on both nodes.
+- name: Set RPC node password for self and peer on every HA node
+  vars:
+    pair_nodes: "{{ vpx_instances | selectattr('ha_pair', 'equalto', item.0.ha_pair) | list }}"
+  netscaler.adc.nsrpcnode:
+    nsip: "{{ item.0.nsip }}"
+    nitro_user: "{{ admin_profile_user }}"
+    nitro_pass: "{{ admin_profile_password }}"
+    nitro_protocol: https
+    validate_certs: "{{ nitro_validate_certs }}"
+    state: present
+    ipaddress: "{{ pair_nodes[item.1].nsip }}"
+    password: "{{ rpc_node_password }}"
+    secure: "YES"
+  loop: "{{ vpx_instances | selectattr('sdx_host', 'equalto', inventory_hostname) | selectattr('ha_pair', 'defined') | product([0, 1]) | list }}"
+  loop_control: {label: "{{ item.0.name }} rpc #{{ item.1 }}"}
+  delegate_to: localhost
+  no_log: true
+
+- name: Add HA peer on each node (id = ha_peer_id, INC from ha_inc_mode)
+  vars:
+    peer: "{{ vpx_instances | selectattr('ha_pair', 'equalto', item.ha_pair) | rejectattr('name', 'equalto', item.name) | first }}"
+  netscaler.adc.hanode:
+    nsip: "{{ item.nsip }}"
+    nitro_user: "{{ admin_profile_user }}"
+    nitro_pass: "{{ admin_profile_password }}"
+    nitro_protocol: https
+    validate_certs: "{{ nitro_validate_certs }}"
+    state: present
+    id: "{{ item.ha_peer_id | int }}"
+    ipaddress: "{{ peer.nsip }}"
+    inc: "{{ 'ENABLED' if ha_inc_mode | bool else 'DISABLED' }}"
+  loop: "{{ vpx_instances | selectattr('sdx_host', 'equalto', inventory_hostname) | selectattr('ha_pair', 'defined') | list }}"
+  loop_control: {label: "{{ item.name }}"}
+  delegate_to: localhost
+  no_log: true

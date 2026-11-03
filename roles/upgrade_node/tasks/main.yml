@@ -1,0 +1,99 @@
+---
+# Adapted from netscaler/automation-toolkit golden_templates/upgrade-netscaler (normal-mode / issu-mode /
+# standalone). Uses NITRO (netscaler.adc.install / hafailover / nsmigration) instead of SSH + nscli, so no
+# password is put on a remote command line.
+- name: Read current version
+  ansible.builtin.include_role: {name: fw_version_check}
+  vars:
+    fw_version_check_nsip: "{{ ansible_host }}"
+    fw_version_check_user: "{{ mpx_nitro_user }}"
+    fw_version_check_pass: "{{ mpx_nitro_pass }}"
+    fw_version_check_validate: "{{ mpx_validate_certs }}"
+    fw_version_check_min_release: "{{ upgrade_target_version.split('-')[0] }}"
+    fw_version_check_min_build: "{{ upgrade_target_version.split('-')[1] }}"
+
+- name: Already on target or newer
+  ansible.builtin.debug:
+    msg: "{{ inventory_hostname }} runs '{{ fw_version_check_version }}' (>= {{ upgrade_target_version }}) - skipping install."
+  when: fw_version_check_ok | bool
+
+- name: Remember whether this node needs the install
+  ansible.builtin.set_fact:
+    upgrade_node_installed: "{{ not (fw_version_check_ok | bool) }}"
+
+- name: Install and reboot
+  when: upgrade_node_installed | bool
+  delegate_to: localhost
+  block:
+    - name: Install build (box reboots; ISSU keeps sessions via migration)
+      netscaler.adc.install:
+        nsip: "{{ ansible_host }}"
+        nitro_user: "{{ mpx_nitro_user }}"
+        nitro_pass: "{{ mpx_nitro_pass }}"
+        nitro_protocol: https
+        validate_certs: "{{ mpx_validate_certs }}"
+        state: installed
+        url: "{{ upgrade_build_url }}"
+        y: true
+        enhancedupgrade: "{{ upgrade_enhanced | default(omit) }}"
+      no_log: true
+
+    - name: Wait for reboot to begin
+      ansible.builtin.pause: {seconds: "{{ upgrade_reboot_pause_s }}"}
+
+    - name: Retry NITRO login until the box answers
+      ansible.builtin.uri:
+        url: "https://{{ ansible_host }}/nitro/v1/config/login"
+        method: POST
+        body_format: json
+        body: {login: {username: "{{ mpx_nitro_user }}", password: "{{ mpx_nitro_pass }}"}}
+        status_code: [200, 201]
+        validate_certs: "{{ mpx_validate_certs }}"
+      register: upgrade_node_wait
+      until: upgrade_node_wait.status | default(0) in [200, 201]
+      retries: "{{ mpx_nitro_login_retries }}"
+      delay: 20
+      no_log: true
+
+    - name: Re-read version
+      ansible.builtin.include_role: {name: fw_version_check}
+      vars:
+        fw_version_check_nsip: "{{ ansible_host }}"
+        fw_version_check_user: "{{ mpx_nitro_user }}"
+        fw_version_check_pass: "{{ mpx_nitro_pass }}"
+        fw_version_check_validate: "{{ mpx_validate_certs }}"
+        fw_version_check_min_release: "{{ upgrade_target_version.split('-')[0] }}"
+        fw_version_check_min_build: "{{ upgrade_target_version.split('-')[1] }}"
+
+    - name: Upgrade landed (and FIPS image stayed FIPS)
+      ansible.builtin.assert:
+        that:
+          - fw_version_check_ok | bool
+          - not (fips_required | bool) or ('fips' in fw_version_check_version | lower)
+        fail_msg: "{{ inventory_hostname }} now runs '{{ fw_version_check_version }}', expected {{ upgrade_target_version }}."
+
+- name: ISSU - start migration on the upgraded secondary and wait
+  when: upgrade_mode == 'issu' and upg_role == 'secondary' and upgrade_node_installed | bool
+  delegate_to: localhost
+  block:
+    - name: Start nsmigration
+      ansible.builtin.uri:
+        url: "https://{{ ansible_host }}/nitro/v1/config/nsmigration?action=start"
+        method: POST
+        body_format: json
+        body: {nsmigration: {}}
+        headers: {X-NITRO-USER: "{{ mpx_nitro_user }}", X-NITRO-PASS: "{{ mpx_nitro_pass }}"}
+        status_code: [200, 201]
+        validate_certs: "{{ mpx_validate_certs }}"
+      no_log: true
+
+    - name: Poll until migration completes
+      ansible.builtin.uri:
+        url: "https://{{ ansible_host }}/nitro/v1/config/nsmigration"
+        headers: {X-NITRO-USER: "{{ mpx_nitro_user }}", X-NITRO-PASS: "{{ mpx_nitro_pass }}"}
+        validate_certs: "{{ mpx_validate_certs }}"
+      register: upgrade_node_mig
+      until: (upgrade_node_mig.json.nsmigration | default([{}]) | first).migrationstatus | default('') == 'Migration is completed'
+      retries: "{{ upgrade_issu_poll_retries }}"
+      delay: 30
+      no_log: true

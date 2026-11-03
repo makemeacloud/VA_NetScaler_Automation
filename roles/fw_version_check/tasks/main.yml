@@ -1,0 +1,27 @@
+---
+# Inputs: fw_version_check_{nsip,user,pass,validate,min_release,min_build}.
+# Sets facts fw_version_check_ok and fw_version_check_version.
+- name: Read nsversion
+  ansible.builtin.uri:
+    url: "https://{{ fw_version_check_nsip }}/nitro/v1/config/nsversion"
+    headers:
+      X-NITRO-USER: "{{ fw_version_check_user }}"
+      X-NITRO-PASS: "{{ fw_version_check_pass }}"
+    validate_certs: "{{ fw_version_check_validate }}"
+  register: fw_version_check_raw
+  delegate_to: localhost
+  no_log: true
+
+- name: Parse release and build from nsversion (e.g. NS14.1 Build 51.80)
+  vars:
+    v: "{{ fw_version_check_raw.json.nsversion.version | default('') }}"
+    m: "{{ v | regex_search('NS(\\d+)\\.(\\d+):?\\s*Build\\s*(\\d+)\\.(\\d+)', '\\1', '\\2', '\\3', '\\4') | default([], true) }}"
+    want_r: "{{ fw_version_check_min_release.split('.') | map('int') | list }}"
+    want_b: "{{ fw_version_check_min_build.split('.') | map('int') | list }}"
+    have: "{{ m | map('int') | list }}"
+  ansible.builtin.set_fact:
+    fw_version_check_version: "{{ v }}"
+    fw_version_check_ok: >-
+      {{ have | length == 4 and (
+         (have[0], have[1]) > (want_r[0], want_r[1]) or
+         ((have[0], have[1]) == (want_r[0], want_r[1]) and (have[2], have[3]) >= (want_b[0], want_b[1]))) }}

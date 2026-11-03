@@ -1,0 +1,5 @@
+---
+collections:
+  - name: netscaler.adc
+    version: ">=2.17.0"   # nslaslicense_offline, install, hafailover
+  - name: ansible.utils

@@ -1,0 +1,15 @@
+---
+# Optional, gated by mpx_set_nsip. Changes the NSIP: the session on the bootstrap IP will drop.
+# UNVERIFIED: exact behaviour of nsconfig ipaddress change over NITRO (may need reboot).
+- name: Move NSIP from bootstrap address to final address
+  netscaler.adc.nsconfig:
+    nsip: "{{ mpx_bootstrap_ip }}"
+    nitro_user: "{{ mpx_nitro_user }}"
+    nitro_pass: "{{ mpx_nitro_pass }}"
+    nitro_protocol: https
+    validate_certs: "{{ mpx_validate_certs }}"
+    state: present
+    ipaddress: "{{ ansible_host }}"
+    netmask: "{{ nsip_netmask }}"
+  when: mpx_set_nsip | bool
+  no_log: true

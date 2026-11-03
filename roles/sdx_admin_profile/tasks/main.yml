@@ -1,0 +1,17 @@
+---
+- name: Create admin (device) profile for VPX instances
+  ansible.builtin.uri:
+    url: "{{ nitro_base }}/config/ns_device_profile"
+    method: POST
+    headers: "{{ nitro_headers }}"
+    body_format: json
+    body:
+      ns_device_profile:
+        name: "{{ admin_profile_name }}"
+        username: "{{ admin_profile_user }}"
+        password: "{{ admin_profile_password }}"
+        type: ns
+    status_code: [200, 201, 409]
+    validate_certs: "{{ nitro_validate_certs }}"
+  delegate_to: localhost
+  no_log: true

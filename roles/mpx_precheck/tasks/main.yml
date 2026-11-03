@@ -1,0 +1,65 @@
+---
+- name: Platform must be decided (sdx | mpx)
+  ansible.builtin.assert:
+    that: platform in ['sdx', 'mpx']
+    fail_msg: "{{ site_name }}: platform is '{{ platform }}'. Large sites are still OPEN (SDX 17000 or MPX 17000)."
+
+- name: No CHANGE_ME placeholders on this node
+  ansible.builtin.assert:
+    that:
+      - "'CHANGE_ME' not in ansible_host ~ nsip_netmask ~ hostname ~ platform_model"
+      - "'CHANGE_ME' not in (mpx_ntp_servers + mpx_dns_servers) | join(',')"
+      - "'CHANGE_ME' not in mpx_nitro_user ~ mpx_nitro_pass ~ rpc_node_password"
+    fail_msg: "{{ inventory_hostname }}: placeholders still present."
+
+- name: HA peer exists, is in the same site and is a different node
+  ansible.builtin.assert:
+    that:
+      - ha_peer in hostvars
+      - ha_peer != inventory_hostname
+      - hostvars[ha_peer].site_name == site_name
+      - hostvars[ha_peer].ha_peer == inventory_hostname
+      - hostvars[ha_peer].platform_model == platform_model
+      - (ha_peer_id | int) >= 1 and (ha_peer_id | int) <= 64
+    fail_msg: "{{ inventory_hostname }}: HA peer {{ ha_peer }} is wrong or does not match."
+
+- name: Different subnets need INC
+  vars:
+    net_me: "{{ (ansible_host ~ '/' ~ nsip_netmask) | ansible.utils.ipaddr('network/prefix') }}"
+    net_peer: "{{ (hostvars[ha_peer].ansible_host ~ '/' ~ hostvars[ha_peer].nsip_netmask) | ansible.utils.ipaddr('network/prefix') }}"
+  ansible.builtin.assert:
+    that: ha_inc_mode | bool or net_me == net_peer
+    fail_msg: "{{ site_name }}: nodes on {{ net_me }} and {{ net_peer }}. Set ha_inc_mode: true."
+
+- name: Approved firmware list is filled in
+  ansible.builtin.assert:
+    that: >-
+      (mpx_fips_approved_builds if fips_required | bool else mpx_non_fips_approved_builds)
+      | reject('search', 'CHANGE_ME') | list | length > 0
+    fail_msg: "{{ site_name }}: set the approved firmware build list (FIPS build for MPX 9200 FIPS)."
+
+- name: Refuse destructive HSM init on MPX 9200 FIPS (it has no HSM)
+  ansible.builtin.assert:
+    that: not (platform_model == 'mpx9200fips' and fips_hsm_init_confirm == 'ERASE-FIPS-HSM')
+    fail_msg: "MPX 9200 FIPS has no HSM; HSM init commands are MPX 14000 FIPS only. Unset fips_hsm_init_confirm."
+
+- name: Lockout guard - confirmations required before disabling local auth
+  ansible.builtin.assert:
+    that:
+      - nsroot_console_verified | default(false) | bool
+      - ldap_admin_login_verified | default(false) | bool
+    fail_msg: >-
+      fips_disable_local_auth is true, but disabling local auth could lock you out. Confirm nsroot logs in
+      from the console (nsroot_console_verified: true) and an LDAP admin logs in (ldap_admin_login_verified: true).
+  when: fips_disable_local_auth | default(false) | bool
+
+- name: FIPS MPX LAS entitlement looks right (must exactly match the LAS account)
+  ansible.builtin.assert:
+    that:
+      - las_entitlement_name is defined
+      - las_entitlement_name is match('^FIPS MPX 92')
+      - las_entitlement_name is search('Premium$')
+    fail_msg: >-
+      {{ inventory_hostname }}: las_entitlement_name '{{ las_entitlement_name | default('') }}' must start with
+      'FIPS MPX 92' and end with 'Premium', exactly as listed in the LAS account.
+  when: fips_required | bool and platform_model == 'mpx9200fips'

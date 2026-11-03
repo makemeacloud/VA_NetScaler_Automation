@@ -1,0 +1,35 @@
+---
+- name: Set hostname
+  netscaler.adc.nshostname:
+    nsip: "{{ ansible_host }}"
+    nitro_user: "{{ mpx_nitro_user }}"
+    nitro_pass: "{{ mpx_nitro_pass }}"
+    nitro_protocol: https
+    validate_certs: "{{ mpx_validate_certs }}"
+    state: present
+    hostname: "{{ hostname }}"
+  no_log: true
+
+- name: Add NTP servers
+  netscaler.adc.ntpserver:
+    nsip: "{{ ansible_host }}"
+    nitro_user: "{{ mpx_nitro_user }}"
+    nitro_pass: "{{ mpx_nitro_pass }}"
+    nitro_protocol: https
+    validate_certs: "{{ mpx_validate_certs }}"
+    state: present
+    serverip: "{{ item }}"
+  loop: "{{ mpx_ntp_servers }}"
+  no_log: true
+
+- name: Add DNS name servers
+  netscaler.adc.dnsnameserver:
+    nsip: "{{ ansible_host }}"
+    nitro_user: "{{ mpx_nitro_user }}"
+    nitro_pass: "{{ mpx_nitro_pass }}"
+    nitro_protocol: https
+    validate_certs: "{{ mpx_validate_certs }}"
+    state: present
+    ip: "{{ item }}"
+  loop: "{{ mpx_dns_servers }}"
+  no_log: true
