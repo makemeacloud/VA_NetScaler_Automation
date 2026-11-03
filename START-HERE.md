@@ -189,11 +189,11 @@ ansible-playbook -i inventories/example/sites.yml mpx.yml --limit site_cle --tag
 Needs firmware **14.1-51.80 or newer**.
 
 ### Turning off local login
-**The script does not do this on our boxes.** In the code, this step only runs on FIPS boxes. Ours are not FIPS.
-If you want it, do it by hand, and only after LDAP admin login works on both boxes:
-1. Log in as `nsroot` from the **console** on both boxes. Make sure it works.
-2. Log in as an LDAP admin (web and SSH) on both boxes. Make sure it works.
-3. Ask the team before you turn local login off. Then check LDAP and console login again.
+The script can do this now, but it is **off** until you turn it on. It also will not run until you mark two checks as done.
+1. Log in as `nsroot` from the **console** on both boxes. If it works, set `nsroot_console_verified: true`.
+2. Log in as an LDAP admin (web and SSH) on both boxes. If it works, set `ldap_admin_login_verified: true`.
+3. Set `disable_local_auth: true`. All three are in `inventories/example/group_vars/adc_sites.yml`.
+4. Run the build again for that site. Then test LDAP and console login one more time.
 
 **For Martinsburg:** same steps. Use the Martinsburg box and site names from `sites.yml`.
 
@@ -249,7 +249,7 @@ ansible-playbook site.yml --tags ha,postconfig --ask-vault-pass
 6. Build the one desk box: `--limit cle_adc_01 --skip-tags ha`.
 7. Build the HA pair: `--limit site_cle`.
 8. Apply the license (one box at a time).
-9. Local login: by hand, only if you want it (see Part 5).
+9. Local login: turn it off with `disable_local_auth` after both login checks pass (see Part 5).
 10. Write down anything that broke, and send it to the team.
 
 ## Part 9. Still open before a real run
