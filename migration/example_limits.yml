@@ -1,5 +1,5 @@
 ---
-# Target capacity for sizing checks. Fill from the MPX 9200 FIPS datasheet AND your license
+# Target capacity for sizing checks. Fill from the MPX 9200 datasheet AND your license
 # (licensed throughput is often lower than the hardware). Leave CHANGE_ME to skip a check.
 throughput_mbps: CHANGE_ME
 ssl_tps: CHANGE_ME          # RSA-2048 (or ECDHE) TPS from the datasheet

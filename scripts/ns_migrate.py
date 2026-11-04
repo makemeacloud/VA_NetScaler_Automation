@@ -243,7 +243,7 @@ def lint(lines, ssl_dir=None, stats=None, limits=None, fips=False):
                                  "its output before loading on 14.1.", line))
         if CLASSIC_AUTHN.match(t):
             findings.append((WARN, no, "classic-authn", "Classic authentication policy; nspepi converts these to "
-                             "advanced policies - verify support on 14.1-FIPS.", line))
+                             "advanced policies - verify support on 14.1.", line))
         for c in (opt(toks, "cipherName") or []):
             if WEAK_CIPHER.search(unquote(c)):
                 if fips:
