@@ -5,7 +5,8 @@
 # at the same time with no preference, so either box could win the election.
 # Now: the intended secondary (mpx_is_primary false) is locked to STAYSECONDARY BEFORE any peer is added,
 # the primary is locked STAYPRIMARY, the primary adds its peer first, then the secondary. The lock is released only after the secondary
-# shows the primary and sync. Already-paired boxes (peer present) are left alone - safe to re-run.
+# shows the primary and sync. Already-paired boxes (peer present) skip the pairing steps, but a left-over
+# lock is still released and the run fails if a node is still locked - safe to re-run.
 - name: Read HA state before pairing (read-only)
   ansible.builtin.uri:
     url: "https://{{ ansible_host }}/nitro/v1/config/hanode"
@@ -88,32 +89,35 @@
       when: not (mpx_is_primary | bool)
       no_log: true
 
-    - name: Secondary sees the primary and is Secondary (read-only)
-      ansible.builtin.uri:
-        url: "https://{{ ansible_host }}/nitro/v1/config/hanode"
-        headers: {X-NITRO-USER: "{{ mpx_nitro_user }}", X-NITRO-PASS: "{{ mpx_nitro_pass }}"}
-        validate_certs: "{{ mpx_validate_certs }}"
-      register: mpx_ha_pair_sec
-      until: >-
-        (mpx_ha_pair_sec.json.hanode | default([]) | length) >= 2 and
-        ((mpx_ha_pair_sec.json.hanode | selectattr('id', 'in', ['0', 0]) | first).state | default('') | lower) == 'secondary'
-      retries: 20
-      delay: 15
-      when: not (mpx_is_primary | bool) and not ansible_check_mode
-      no_log: true
 
-    - name: Release the locks on both nodes (hastatus ENABLED) - normal failover works again
-      netscaler.adc.hanode:
-        nsip: "{{ ansible_host }}"
-        nitro_user: "{{ mpx_nitro_user }}"
-        nitro_pass: "{{ mpx_nitro_pass }}"
-        nitro_protocol: https
-        validate_certs: "{{ mpx_validate_certs }}"
-        state: present
-        id: 0
-        hastatus: ENABLED
-      when: mpx_ha_release_lock | default(true) | bool
-      no_log: true
+# Wait and release run even when already paired: if an earlier run failed after the peers were
+# added, the box counts as paired but is still locked. Re-running releases the lock.
+- name: Secondary sees the primary and is Secondary (read-only)
+  ansible.builtin.uri:
+    url: "https://{{ ansible_host }}/nitro/v1/config/hanode"
+    headers: {X-NITRO-USER: "{{ mpx_nitro_user }}", X-NITRO-PASS: "{{ mpx_nitro_pass }}"}
+    validate_certs: "{{ mpx_validate_certs }}"
+  register: mpx_ha_pair_sec
+  until: >-
+    (mpx_ha_pair_sec.json.hanode | default([]) | length) >= 2 and
+    ((mpx_ha_pair_sec.json.hanode | selectattr('id', 'in', ['0', 0]) | first).state | default('') | lower) == 'secondary'
+  retries: 20
+  delay: 15
+  when: not (mpx_is_primary | bool) and not ansible_check_mode
+  no_log: true
+
+- name: Release the locks on both nodes (hastatus ENABLED) - normal failover works again
+  netscaler.adc.hanode:
+    nsip: "{{ ansible_host }}"
+    nitro_user: "{{ mpx_nitro_user }}"
+    nitro_pass: "{{ mpx_nitro_pass }}"
+    nitro_protocol: https
+    validate_certs: "{{ mpx_validate_certs }}"
+    state: present
+    id: 0
+    hastatus: ENABLED
+  when: mpx_ha_release_lock | default(true) | bool
+  no_log: true
 
 # Adopted from netscaler/automation-toolkit events/20230206/step1_configure_ha: CLI prompt shows user@HA-state.
 - name: Set CLI prompt to user@HA-state (%u@%s)
@@ -142,3 +146,11 @@
   when: not ansible_check_mode
   check_mode: false
   no_log: true
+
+- name: Not left locked STAYPRIMARY/STAYSECONDARY
+  ansible.builtin.assert:
+    that: >-
+      ((mpx_ha_pair_state.json.hanode | default([]) | selectattr('id', 'in', ['0', 0]) | first).hastatus | default('ENABLED')
+      | upper) not in ['STAYPRIMARY', 'STAYSECONDARY'] or not (mpx_ha_release_lock | default(true) | bool)
+    fail_msg: "{{ inventory_hostname }} is still locked; failover will not work. Re-run the ha tag or set hastatus ENABLED by hand."
+  when: not ansible_check_mode

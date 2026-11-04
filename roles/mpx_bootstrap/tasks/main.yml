@@ -1,8 +1,11 @@
 ---
-# Optional, gated by mpx_set_nsip. Changes the NSIP: the session on the bootstrap IP will drop.
-# UNVERIFIED: exact behaviour of nsconfig ipaddress change over NITRO (may need a reboot on some builds).
-# Re-run safe: if the final NSIP already answers, nothing is changed. After the change the config is
-# SAVED on the new IP, so a later reboot (LAS, upgrade, power) cannot bring the box back on the old IP.
+# Optional, gated by mpx_set_nsip. Changes the NSIP from mpx_bootstrap_ip to ansible_host.
+# On NetScaler `set ns config -IPAddress` only takes effect after SAVE + REBOOT. So the order is:
+#   set new IP (on bootstrap IP) -> save (on bootstrap IP) -> cold reboot -> wait on the new IP -> save again.
+# If a build applies the change at once instead (session drops, bootstrap IP stops answering), the save and
+# reboot on the bootstrap IP are skipped and the box is saved on the new IP.
+# UNVERIFIED on hardware: the NITRO reboot call and how long a 9200 takes to come back (mpx_wait_timeout_s).
+# Re-run safe: if the final NSIP already answers, nothing is changed.
 - name: Bootstrap NSIP change
   when: mpx_set_nsip | bool
   block:
@@ -24,8 +27,44 @@
         netmask: "{{ nsip_netmask }}"
       when: mpx_bootstrap_final_up is failed
       register: mpx_bootstrap_change
-      ignore_errors: true   # the NITRO session usually drops mid-call when the IP moves
+      ignore_errors: true   # on builds that apply the change at once, the session drops mid-call
       no_log: true
+
+    - name: Is the bootstrap IP still answering (change waits for a reboot)?
+      ansible.builtin.wait_for: {host: "{{ mpx_bootstrap_ip }}", port: 443, timeout: 10}
+      register: mpx_bootstrap_old_up
+      ignore_errors: true
+      when: mpx_bootstrap_final_up is failed and not ansible_check_mode
+
+    - name: Save on the bootstrap IP (the new NSIP is only used after save + reboot)
+      netscaler.adc.save_config:
+        nsip: "{{ mpx_bootstrap_ip }}"
+        nitro_user: "{{ mpx_nitro_user }}"
+        nitro_pass: "{{ mpx_nitro_pass }}"
+        nitro_protocol: https
+        validate_certs: "{{ mpx_validate_certs }}"
+      when: mpx_bootstrap_final_up is failed and not ansible_check_mode and mpx_bootstrap_old_up is succeeded
+      register: mpx_bootstrap_presave
+      no_log: true
+
+    - name: Reboot from the bootstrap IP so the new NSIP takes effect
+      ansible.builtin.uri:
+        url: "https://{{ mpx_bootstrap_ip }}/nitro/v1/config/reboot"
+        method: POST
+        headers: {X-NITRO-USER: "{{ mpx_nitro_user }}", X-NITRO-PASS: "{{ mpx_nitro_pass }}"}
+        body_format: json
+        body: {reboot: {warm: false}}
+        validate_certs: "{{ mpx_validate_certs }}"
+        status_code: [200, 201, -1]
+        timeout: 30
+      when: mpx_bootstrap_presave is succeeded and mpx_bootstrap_presave is not skipped
+      register: mpx_bootstrap_reboot
+      failed_when: false   # the connection usually drops while the box goes down; the next task checks it went down
+      no_log: true
+
+    - name: Wait for the bootstrap IP to stop answering (reboot started)
+      ansible.builtin.wait_for: {host: "{{ mpx_bootstrap_ip }}", port: 443, state: stopped, timeout: 300}
+      when: mpx_bootstrap_presave is succeeded and mpx_bootstrap_presave is not skipped
 
     - name: Wait for the box on the final NSIP
       ansible.builtin.wait_for: {host: "{{ ansible_host }}", port: 443, timeout: "{{ mpx_wait_timeout_s }}"}
@@ -38,7 +77,7 @@
         nitro_pass: "{{ mpx_nitro_pass }}"
         nitro_protocol: https
         validate_certs: "{{ mpx_validate_certs }}"
-      when: mpx_bootstrap_final_up is failed
+      when: mpx_bootstrap_final_up is failed and not ansible_check_mode
       register: mpx_bootstrap_save
       until: mpx_bootstrap_save is succeeded
       retries: 10

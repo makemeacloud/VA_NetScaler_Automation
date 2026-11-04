@@ -7,3 +7,5 @@ out/
 ns_discovery_out/
 *bookmarks_hosts*
 vault.yml
+migration_out/
+*.migrated.conf

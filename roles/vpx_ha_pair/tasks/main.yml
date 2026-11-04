@@ -4,17 +4,19 @@
 # Order (tasks run in lock-step across both SDX hosts):
 #   lock primary STAYPRIMARY / secondary STAYSECONDARY -> RPC passwords -> save -> primary adds peer ->
 #   secondary adds peer -> wait until secondary is Secondary -> release locks (ENABLED).
-# Nodes already paired with their peer are skipped (safe to re-run).
+# Nodes already paired with their peer skip pairing; left-over locks are still released (safe to re-run).
 - name: Work out each local node's peer and intended role
   vars:
     mine: "{{ vpx_instances | selectattr('sdx_host', 'equalto', inventory_hostname) | selectattr('ha_pair', 'defined') | list }}"
   ansible.builtin.set_fact:
+    # Every tag uses {%- -%} so no whitespace is printed: the result must be a bare list literal,
+    # otherwise Ansible keeps it as a string and the loops below fail.
     vpx_ha_pair_nodes: >-
-      {% set out = [] %}{% for n in mine %}{% set pair = vpx_instances | selectattr('ha_pair', 'equalto', n.ha_pair) | list %}
-      {% set flagged = pair | selectattr('ha_primary', 'defined') | selectattr('ha_primary') | list %}
-      {% set prim = (flagged | first).name if flagged | length == 1 else (pair | first).name %}
-      {% set peer = pair | rejectattr('name', 'equalto', n.name) | first %}
-      {% set _ = out.append(n | combine({'peer_nsip': peer.nsip, 'is_primary': n.name == prim})) %}{% endfor %}{{ out }}
+      {%- set out = [] -%}{%- for n in mine -%}{%- set pair = vpx_instances | selectattr('ha_pair', 'equalto', n.ha_pair) | list -%}
+      {%- set flagged = pair | selectattr('ha_primary', 'defined') | selectattr('ha_primary') | list -%}
+      {%- set prim = (flagged | first).name if flagged | length == 1 else (pair | first).name -%}
+      {%- set peer = pair | rejectattr('name', 'equalto', n.name) | first -%}
+      {%- set _ = out.append(n | combine({'peer_nsip': peer.nsip, 'is_primary': n.name == prim})) -%}{%- endfor -%}{{ out }}
 
 - name: Read HA state (read-only)
   ansible.builtin.uri:
@@ -31,8 +33,8 @@
 - name: Nodes already paired with their peer
   ansible.builtin.set_fact:
     vpx_ha_pair_paired: >-
-      {% set p = [] %}{% for r in vpx_ha_pair_before.results %}{% if r.item.peer_nsip in (r.json.hanode | default([])
-      | map(attribute='ipaddress') | list) %}{% set _ = p.append(r.item.name) %}{% endif %}{% endfor %}{{ p }}
+      {%- set p = [] -%}{%- for r in vpx_ha_pair_before.results -%}{%- if r.item.peer_nsip in (r.json.hanode | default([])
+      | map(attribute='ipaddress') | list) -%}{%- set _ = p.append(r.item.name) -%}{%- endif -%}{%- endfor -%}{{ p }}
 
 - name: Unpaired nodes to work on
   ansible.builtin.set_fact:
@@ -124,12 +126,14 @@
     ((vpx_ha_pair_sec.json.hanode | selectattr('id', 'in', ['0', 0]) | first).state | default('') | lower) == 'secondary'
   retries: 20
   delay: 15
-  loop: "{{ vpx_ha_pair_todo | rejectattr('is_primary') | list }}"
+  loop: "{{ vpx_ha_pair_nodes | rejectattr('is_primary') | list }}"
   loop_control: {label: "{{ item.name }}"}
   when: not ansible_check_mode
   delegate_to: localhost
   no_log: true
 
+# Wait and release run on ALL nodes, not only the unpaired ones: if an earlier run failed after the
+# peers were added, the nodes count as paired but are still locked. Re-running releases them.
 - name: Release the locks (hastatus ENABLED)
   netscaler.adc.hanode:
     nsip: "{{ item.nsip }}"
@@ -140,7 +144,30 @@
     state: present
     id: 0
     hastatus: ENABLED
-  loop: "{{ vpx_ha_pair_todo }}"
+  loop: "{{ vpx_ha_pair_nodes }}"
   loop_control: {label: "{{ item.name }}"}
   delegate_to: localhost
   no_log: true
+
+- name: Read hastatus after release (read-only)
+  ansible.builtin.uri:
+    url: "https://{{ item.nsip }}/nitro/v1/config/hanode"
+    headers: {X-NITRO-USER: "{{ admin_profile_user }}", X-NITRO-PASS: "{{ admin_profile_password }}"}
+    validate_certs: "{{ nitro_validate_certs }}"
+  loop: "{{ vpx_ha_pair_nodes }}"
+  loop_control: {label: "{{ item.name }}"}
+  register: vpx_ha_pair_after
+  when: not ansible_check_mode
+  delegate_to: localhost
+  no_log: true
+
+- name: No node is left locked STAYPRIMARY/STAYSECONDARY
+  ansible.builtin.assert:
+    that: >-
+      ((item.json.hanode | default([]) | selectattr('id', 'in', ['0', 0]) | first).hastatus | default('ENABLED')
+      | upper) not in ['STAYPRIMARY', 'STAYSECONDARY']
+    fail_msg: "{{ item.item.name }} is still locked; failover will not work. Re-run the ha tag or set hastatus ENABLED by hand."
+    quiet: true
+  loop: "{{ vpx_ha_pair_after.results | default([]) }}"
+  loop_control: {label: "{{ item.item.name }}"}
+  when: not ansible_check_mode

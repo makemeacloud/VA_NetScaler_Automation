@@ -1,0 +1,14 @@
+---
+# EXAMPLE ONLY. One map file per old box (or per old HA pair).
+# interfaces: old port -> MPX 9200 port. Every port/channel in the old config must be listed
+# (or set interfaces_unchanged: true if they really are the same). Get 9200 names from "show interface".
+interfaces:
+  "0/1": "0/1"          # CHANGE_ME
+  "1/1": "CHANGE_ME"
+  "1/2": "CHANGE_ME"
+  "LA/1": "LA/1"
+# interfaces_unchanged: false
+# ips: optional re-IP, old -> new (exact match, also inside policy expressions). Leave empty to keep IPs.
+ips: {}
+# strip_regex: extra lines to drop (Python regex, matched against the whole line)
+strip_regex: []
