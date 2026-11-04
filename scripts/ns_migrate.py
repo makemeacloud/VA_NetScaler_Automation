@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Config migration helper: existing NetScalers -> MPX 9200 FIPS (14.1-FIPS). Stages 1-4 only.
+"""Config migration helper: existing NetScalers -> MPX 9200 (non-FIPS; FIPS optional with --fips). Stages 1-4 only.
 
   export       READ-ONLY. Pull running + saved config, version, HA state, a stats snapshot and the
                SSL files that certKeys reference (private keys only with --include-keys).
   transform    Offline. Rewrite one ns.conf for the new box: interface map, optional re-IP, strip
                node-specific lines (NSIP, hostname, HA node, RPC node, nsroot, legacy HSM...). Runs lint.
-  lint         Offline. Findings for the 9200 FIPS target: classic policies (run nspepi), weak ciphers /
-               old protocols, HSM keys, box-encrypted secrets, unmapped interfaces, missing cert files,
-               partitions, cluster, sizing vs. limits.
+  lint         Offline. Findings for the 9200 target: classic policies (run nspepi), HSM keys, box-encrypted secrets, unmapped interfaces, missing cert files,
+               partitions, cluster, sizing vs. limits. Weak ciphers / old protocols are INFO by default;
+               with --fips (MPX 9200 FIPS target) they are WARN against FIPS rules.
   merge-check  Offline. Name / VIP / VLAN / IP collisions when several old boxes land on one new pair.
 
 Nothing here writes to any NetScaler. Applying, validation and cutover are later stages (not built yet).
-FIPS rules below are heuristics marked "verify": confirm against the 14.1-FIPS docs for your build.
+FIPS rules (--fips only) are heuristics marked "verify": confirm against the 14.1-FIPS docs for your build.
 """
 import argparse
 import base64
@@ -143,13 +143,13 @@ def strip_reason(p, nsip):
     if t == "system user" and p["name"].lower() == "nsroot":
         return "nsroot is set on the new box itself"
     if t in ("ns ip", "ns ip6") and (p["name"] == nsip or "nsip" in low or "-scope" in low and "link" in low):
-        return "NSIP / link-local address belongs to the old box (NSIP set by mpx_bootstrap, GUI by mpx_fips)"
+        return "NSIP / link-local address belongs to the old box (NSIP set by mpx_bootstrap, GUI by mpx_base)"
     if t == "ns encryptionparams":
         return "box-specific encryption parameters"
     if t == "snmp engineid":
         return "SNMP engine id is per box"
     if t.startswith("ssl fips") or (v in ("create", "add") and t == "ssl fipskey"):
-        return "legacy HSM (MPX/SDX 14000 FIPS); MPX 9200 FIPS has no HSM"
+        return "legacy HSM (MPX/SDX 14000 FIPS); MPX 9200 has no HSM"
     if t.startswith("cluster"):
         return "cluster config; target design is an HA pair"
     return None
@@ -215,7 +215,8 @@ CLASSIC_AUTHN = re.compile(r"^authentication (ldap|radius|cert|local|tacacs|saml
 RULE_TYPES = re.compile(r"policy|expression")
 
 
-def lint(lines, ssl_dir=None, stats=None, limits=None):
+def lint(lines, ssl_dir=None, stats=None, limits=None, fips=False):
+    """fips=True: target is MPX 9200 FIPS -> weak ciphers / old protocols are WARN fips-*; else INFO."""
     findings, counts, files = [], {}, []
     for no, raw in enumerate(lines, 1):
         line = raw.rstrip("\r\n")
@@ -245,12 +246,20 @@ def lint(lines, ssl_dir=None, stats=None, limits=None):
                              "advanced policies - verify support on 14.1-FIPS.", line))
         for c in (opt(toks, "cipherName") or []):
             if WEAK_CIPHER.search(unquote(c)):
-                findings.append((WARN, no, "fips-cipher", f"Cipher '{unquote(c)}' is likely not FIPS-approved "
-                                 "(verify on 14.1-FIPS).", line))
+                if fips:
+                    findings.append((WARN, no, "fips-cipher", f"Cipher '{unquote(c)}' is likely not FIPS-approved "
+                                     "(verify on 14.1-FIPS).", line))
+                else:
+                    findings.append((INFO, no, "weak-cipher", f"Cipher '{unquote(c)}' is weak; consider dropping "
+                                     "it on the new box.", line))
         for proto in ("ssl3", "tls1", "tls11"):
             if (opt(toks, proto) or [""])[0].upper() == "ENABLED":
-                findings.append((WARN, no, "fips-protocol", f"-{proto} ENABLED: old protocol, likely not allowed "
-                                 "in FIPS mode (verify).", line))
+                if fips:
+                    findings.append((WARN, no, "fips-protocol", f"-{proto} ENABLED: old protocol, likely not "
+                                     "allowed in FIPS mode (verify).", line))
+                else:
+                    findings.append((INFO, no, "old-protocol", f"-{proto} ENABLED: old protocol; consider "
+                                     "disabling it on the new box.", line))
         em = (opt(toks, "encryptmethod") or [""])[0].upper()
         if "-kek" in low.split() or em not in ("", "ENCMTHD_1"):
             findings.append((WARN, no, "box-secret", "Secret encrypted with the OLD box's key (KEK). It will not "
@@ -475,11 +484,13 @@ def main(argv=None):
     t.add_argument("--ssl-dir")
     t.add_argument("--stats", help="meta.json from export (for sizing)")
     t.add_argument("--limits", help="YAML: throughput_mbps, ssl_tps, headroom_pct")
+    t.add_argument("--fips", action="store_true", help="target is MPX 9200 FIPS: apply FIPS cipher/protocol checks")
     li = sub.add_parser("lint", help="findings for one ns.conf")
     li.add_argument("conf")
     li.add_argument("--ssl-dir")
     li.add_argument("--stats")
     li.add_argument("--limits")
+    li.add_argument("--fips", action="store_true", help="target is MPX 9200 FIPS: apply FIPS cipher/protocol checks")
     li.add_argument("--out")
     m = sub.add_parser("merge-check", help="collisions between several transformed configs")
     m.add_argument("confs", nargs="+")
@@ -512,7 +523,7 @@ def main(argv=None):
     if a.cmd == "transform":
         lines = Path(a.conf).read_text(encoding="utf-8", errors="replace").splitlines()
         kept, stripped, tf, st = transform(lines, load_yaml(a.map))
-        lf, counts, _ = lint(kept, a.ssl_dir, stats, limits)
+        lf, counts, _ = lint(kept, a.ssl_dir, stats, limits, fips=a.fips)
         out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
         base = Path(a.conf).parent.name if Path(a.conf).name == "ns.conf" else Path(a.conf).stem
         (out / f"{base}.migrated.conf").write_text("\n".join(kept) + "\n", encoding="utf-8")
@@ -525,7 +536,7 @@ def main(argv=None):
 
     if a.cmd == "lint":
         lines = Path(a.conf).read_text(encoding="utf-8", errors="replace").splitlines()
-        findings, counts, _ = lint(lines, a.ssl_dir, stats, limits)
+        findings, counts, _ = lint(lines, a.ssl_dir, stats, limits, fips=a.fips)
         if a.out:
             Path(a.out).mkdir(parents=True, exist_ok=True)
             write_findings(findings, Path(a.out) / "findings.csv")

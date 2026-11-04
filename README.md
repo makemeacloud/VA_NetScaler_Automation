@@ -77,7 +77,7 @@ or, if unset, the first host name of the pair in sort order. Saves run on every 
 4. Set `disable_local_auth: true` and run `--tags precheck,base`. Without both confirmations, it stops.
 5. Check LDAP admin login again, and nsroot from console, before moving on.
 
-## Config migration to MPX 9200 FIPS (`scripts/ns_migrate.py`, stages 1-4)
+## Config migration to MPX 9200 (`scripts/ns_migrate.py`, stages 1-4)
 Moves each old box's config onto a new 9200 pair built by `mpx.yml`. Built so far: export, transform, lint,
 merge-check. **Nothing here writes to any NetScaler.** Apply, validation and cutover/rollback are not built yet.
 ```
@@ -97,9 +97,10 @@ python3 scripts/ns_migrate.py merge-check migration_out/*/new/*.migrated.conf
   encryption params, SNMP engine id, legacy `ssl fips`, cluster) into `<host>.stripped.csv`; the playbooks set those.
 - Exit code 1 means BLOCK findings: unmapped interfaces, classic policies/features (filter, sc, pq, `ns_true`,
   `REQ.HTTP...`, CS `-url`/`-domain`), HSM keys, missing cert files, name/VIP collisions.
-  WARN: weak ciphers, SSLv3/TLS1.0/1.1 enabled, secrets encrypted with the old box's key (re-enter them),
+  WARN: secrets encrypted with the old box's key (re-enter them),
   classic authentication policies, admin partitions (their config is not in the default ns.conf), sizing.
-- FIPS cipher/protocol rules are heuristics: confirm against the 14.1-FIPS docs for your build.
+- Weak ciphers and SSLv3/TLS1.0/1.1 are INFO (non-FIPS 9200). Add `--fips` to transform/lint for an MPX 9200 FIPS
+  target: they become WARN against FIPS rules (heuristics: confirm against the 14.1-FIPS docs for your build).
 - Sizing uses one stats snapshot, not a peak: use ADM/SNMP history for the real number.
 - Tests: `python3 -m unittest discover -s tests` (synthetic sample config in `tests/fixtures`).
 

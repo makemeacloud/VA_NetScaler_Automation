@@ -11,3 +11,5 @@ upgrade_issu_poll_retries: 20
 upgrade_failback: true
 upgrade_backup: true          # full system backup on the box before install
 upgrade_force_failover: false # never force a failover unless you know the peer is healthy
+upgrade_sync_gate_mixed: false # true = before the mid-upgrade failover also require hasync SUCCESS/ENABLED
+                               # (nodes on different firmware may never report it: test on the lab pair first)

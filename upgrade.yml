@@ -83,7 +83,11 @@
   vars_files: [upgrade_vars.yml]
   roles: [upgrade_node]
   post_tasks:
-    - name: Normal mode - peer UP and config in sync before failover
+    # Here the two nodes run DIFFERENT firmware. NetScaler may not report sync SUCCESS between versions,
+    # so by default this gate only checks: peer is PRIMARY and this upgraded node is back as SECONDARY.
+    # The config was synced and saved before the upgrade (precheck + upgrade_node). Set
+    # upgrade_sync_gate_mixed: true to also require hasync SUCCESS/ENABLED (check on the lab pair first).
+    - name: Normal mode - peer UP and this node back as Secondary before failover
       when: upg_role == 'secondary' and upgrade_mode == 'normal' and upgrade_node_installed | bool
       ansible.builtin.uri:
         url: "https://{{ ansible_host }}/nitro/v1/config/hanode"
@@ -92,7 +96,9 @@
       register: upg_pre_fo
       until: >-
         ((upg_pre_fo.json.hanode | rejectattr('id', 'in', ['0', 0]) | first).state | default('') | upper) == 'PRIMARY'
-        and ((upg_pre_fo.json.hanode | selectattr('id', 'in', ['0', 0]) | first).hasync | default('') | upper) in ['SUCCESS', 'ENABLED']
+        and ((upg_pre_fo.json.hanode | selectattr('id', 'in', ['0', 0]) | first).state | default('') | upper) == 'SECONDARY'
+        and (not (upgrade_sync_gate_mixed | bool)
+             or ((upg_pre_fo.json.hanode | selectattr('id', 'in', ['0', 0]) | first).hasync | default('') | upper) in ['SUCCESS', 'ENABLED'])
       retries: 20
       delay: 15
       check_mode: false

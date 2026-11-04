@@ -69,7 +69,7 @@ class Transform(unittest.TestCase):
 
 class Lint(unittest.TestCase):
     def setUp(self):
-        self.find, self.counts, self.files = m.lint(LINES)
+        self.find, self.counts, self.files = m.lint(LINES, fips=True)
 
     def test_expected_findings(self):
         c = codes(self.find)
@@ -113,6 +113,15 @@ class Lint(unittest.TestCase):
         missing = [x for x in f if x[2] == "ssl-file-missing"]
         self.assertEqual({x[0] for x in missing if "hsm.crt" in x[3]}, {m.BLOCK})
         self.assertEqual({x[0] for x in missing if "app.key" in x[3]}, {m.WARN})
+
+    def test_non_fips_default(self):
+        f, _, _ = m.lint(LINES)
+        c = codes(f)
+        self.assertFalse({"fips-cipher", "fips-protocol"} & c)
+        self.assertIn("weak-cipher", c)
+        self.assertIn("old-protocol", c)
+        self.assertEqual({x[0] for x in f if x[2] in ("weak-cipher", "old-protocol")}, {m.INFO})
+        self.assertIn("fips-hsm", c)  # old HSM keys cannot move to any 9200
 
     def test_sizing(self):
         f = m.sizing({"throughput_mbps": 9000}, {"throughput_mbps": 10000, "ssl_tps": "CHANGE_ME"})

@@ -116,10 +116,19 @@ UNVERIFIED:
 - `config/systemfile?args=filename:X,filelocation:%2Fnsconfig%2Fssl` returns base64 `filecontent`; whether
   nsadmin/read-only may read /nsconfig/ssl (keys especially).
 - Stat fields `stat/ns` rxmbitsrate/txmbitsrate/cpuusagepcnt/memusagepcnt and `stat/ssl` ssltransactionsrate.
-- FIPS lint: weak-cipher pattern and SSLv3/TLS1.0/1.1 as "not allowed" are assumptions; check the 14.1-FIPS
+- FIPS lint (--fips only): weak-cipher pattern and SSLv3/TLS1.0/1.1 as "not allowed" are assumptions; check the 14.1-FIPS
   cipher list. Which classic authentication policies still load on 14.1-FIPS.
 - KEK: secrets with `-kek` / ENCMTHD_3+ assumed not to decrypt on another box without the old box's key files;
   check NetScaler's procedure (or re-enter the secrets).
 - Classic expression detection is pattern-based (REQ./RES. classic syntax, ns_* built-ins except ns_adv_*);
   nspepi is the real converter.
 - 9200 interface names: take from `show interface` on the new box; nothing is assumed.
+
+## Fixes 2026-11-04 (not verified on hardware)
+- mpx_bootstrap: NSIP change now set -> save on bootstrap IP -> cold reboot via POST `config/reboot`
+  `{"reboot":{"warm":false}}` -> wait on new IP -> save. Reboot call body and 9200 boot time unverified.
+- HA pairing: wait + lock release now run on every run (also when already paired) and the role fails if a node
+  still shows hastatus STAYPRIMARY/STAYSECONDARY. The `hastatus` field name in the hanode GET reply is unverified.
+- upgrade.yml mid-upgrade gate: by default checks peer PRIMARY + this node SECONDARY only;
+  `upgrade_sync_gate_mixed: true` also requires hasync SUCCESS/ENABLED. What hasync shows between versions: test on the lab pair.
+- PuTTY kits: `add ns rpcNode <PEER_NSIP>` before `set`; NSIP change = set, save, reboot.
