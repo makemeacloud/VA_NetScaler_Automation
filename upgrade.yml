@@ -84,9 +84,9 @@
   roles: [upgrade_node]
   post_tasks:
     # Here the two nodes run DIFFERENT firmware. NetScaler may not report sync SUCCESS between versions,
-    # so by default this gate only checks: peer is PRIMARY and this upgraded node is back as SECONDARY.
-    # The config was synced and saved before the upgrade (precheck + upgrade_node). Set
-    # upgrade_sync_gate_mixed: true to also require hasync SUCCESS/ENABLED (check on the lab pair first).
+    # Always checked: peer is PRIMARY and this upgraded node is back as SECONDARY. With
+    # upgrade_sync_gate_mixed: true (default) hasync must also be SUCCESS/ENABLED; set false only if the lab
+    # pair shows it never reports that between versions.
     - name: Normal mode - peer UP and this node back as Secondary before failover
       when: upg_role == 'secondary' and upgrade_mode == 'normal' and upgrade_node_installed | bool
       ansible.builtin.uri:

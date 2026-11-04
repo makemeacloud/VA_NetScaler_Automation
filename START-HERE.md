@@ -258,8 +258,20 @@ ansible-playbook site.yml --tags ha,postconfig --ask-vault-pass
 - Approved standard 14.1 firmware build (51.80 or newer).
 - NTP, DNS, LDAP details, and the hostname naming rule.
 - Exact license name from your LAS account (for example `MPX 9200 Premium`).
-- Moving the app config (VIPs, services, certs, logins) from the old boxes. **The tools do not do this yet.**
+- Moving the app config (VIPs, services, certs, logins) from the old boxes: `scripts/ns_migrate.py` now
+  **reads** each old box and builds a cleaned-up config file for you to review (see Part 10). It does **not**
+  load anything onto the new boxes yet.
 - OK from NetScaler/BlueAlly to use the toolkit code (it has no license file).
+
+## Part 10. Tool 5: `ns_migrate.py` (copy app config off an old box, look, don't touch)
+1. Export (read-only, asks for the password): `python3 scripts/ns_migrate.py export --host <old box NSIP> --out migration_out`
+   Export the HA **primary**. The files hold password hashes: keep `migration_out` in a protected folder.
+2. Run NetScaler's `nspepi` on `migration_out/<host>/ns.conf` to convert old classic policies.
+3. Copy `migration/example_map.yml`, fill in old -> new port names (from `show interface` on the 9200).
+4. Transform: `python3 scripts/ns_migrate.py transform migration_out/<host>/ns.conf --map <your map> --out migration_out/<host>/new`
+5. Read `<host>.summary.md`. Exit code 1 = BLOCK items to fix first (unmapped ports, classic policies, partitions,
+   missing certs). Several old boxes onto one pair? Run `merge-check` on all the `.migrated.conf` files.
+Loading the result onto the new pair and the cutover are **not built yet**. Never have the same VIPs live on old and new.
 
 ---
 

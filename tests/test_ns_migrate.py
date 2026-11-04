@@ -123,6 +123,14 @@ class Lint(unittest.TestCase):
         self.assertEqual({x[0] for x in f if x[2] in ("weak-cipher", "old-protocol")}, {m.INFO})
         self.assertIn("fips-hsm", c)  # old HSM keys cannot move to any 9200
 
+    def test_partition_blocks(self):
+        self.assertEqual({f[0] for f in self.find if f[2] == "partition"}, {m.BLOCK})
+
+    def test_safe_target(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.assertIsNotNone(m.safe_target(d, Path("sub/app.crt")))
+            self.assertIsNone(m.safe_target(d, Path("../../evil.crt")))
+
     def test_sizing(self):
         f = m.sizing({"throughput_mbps": 9000}, {"throughput_mbps": 10000, "ssl_tps": "CHANGE_ME"})
         self.assertEqual(len(f), 1)

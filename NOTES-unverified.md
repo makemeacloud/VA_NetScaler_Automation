@@ -130,5 +130,5 @@ UNVERIFIED:
 - HA pairing: wait + lock release now run on every run (also when already paired) and the role fails if a node
   still shows hastatus STAYPRIMARY/STAYSECONDARY. The `hastatus` field name in the hanode GET reply is unverified.
 - upgrade.yml mid-upgrade gate: by default checks peer PRIMARY + this node SECONDARY only;
-  `upgrade_sync_gate_mixed: true` also requires hasync SUCCESS/ENABLED. What hasync shows between versions: test on the lab pair.
+  `upgrade_sync_gate_mixed: true` (default, fails closed) also requires hasync SUCCESS/ENABLED. What hasync shows between versions: test on the lab pair.
 - PuTTY kits: `add ns rpcNode <PEER_NSIP>` before `set`; NSIP change = set, save, reboot.

@@ -95,14 +95,20 @@ python3 scripts/ns_migrate.py merge-check migration_out/*/new/*.migrated.conf
   after import. HSM keys (`-fipsKey`, MPX/SDX 14000 FIPS) cannot be exported: issue new keys on the 9200.
 - transform strips lines that belong to the old box (NSIP, hostname, HA node, RPC node, nsroot, link-local IPv6,
   encryption params, SNMP engine id, legacy `ssl fips`, cluster) into `<host>.stripped.csv`; the playbooks set those.
-- Exit code 1 means BLOCK findings: unmapped interfaces, classic policies/features (filter, sc, pq, `ns_true`,
+- Exit code 1 means BLOCK findings: unmapped interfaces, admin partitions (their config is not in the default
+  ns.conf: export and migrate each one separately), classic policies/features (filter, sc, pq, `ns_true`,
   `REQ.HTTP...`, CS `-url`/`-domain`), HSM keys, missing cert files, name/VIP collisions.
   WARN: secrets encrypted with the old box's key (re-enter them),
-  classic authentication policies, admin partitions (their config is not in the default ns.conf), sizing.
+  classic authentication policies, sizing.
 - Weak ciphers and SSLv3/TLS1.0/1.1 are INFO (non-FIPS 9200). Add `--fips` to transform/lint for an MPX 9200 FIPS
   target: they become WARN against FIPS rules (heuristics: confirm against the 14.1-FIPS docs for your build).
 - Sizing uses one stats snapshot, not a peak: use ADM/SNMP history for the real number.
-- Tests: `python3 -m unittest discover -s tests` (synthetic sample config in `tests/fixtures`).
+- Exported `ns.conf` / `saved.conf` hold password hashes and secrets: written owner-only (0600), like keys.
+  Cert/key names that would land outside `<out>/<host>/ssl` (e.g. `../`) are skipped and listed as missing.
+- Not handled yet (needed before any load/cutover step): the old and new boxes must never have the same VIPs/SNIPs
+  live at once (IP conflict). Plan the cutover so old VIPs go down before new ones come up, or re-IP.
+- Tests: `python3 -m unittest discover -s tests`, or `python3 -m pytest tests` (both run the same tests;
+  synthetic sample config in `tests/fixtures`).
 
 ## Discovery and mapping tool (read-only)
 From a browser bookmarks HTML export (already parsed into `inventories/bookmarks_hosts.txt`):

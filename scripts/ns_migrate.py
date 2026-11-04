@@ -273,8 +273,9 @@ def lint(lines, ssl_dir=None, stats=None, limits=None, fips=False):
                 if f:
                     files.append((no, kind, unquote(f[0]), line))
         if t == "ns partition":
-            findings.append((WARN, no, "partition", f"Admin partition '{p['name']}': its config lives in "
-                             "/nsconfig/partitions/<name>/ns.conf and is NOT in this file.", line))
+            findings.append((BLOCK, no, "partition", f"Admin partition '{p['name']}': its config lives in "
+                             "/nsconfig/partitions/<name>/ns.conf and is NOT in this file. Export and migrate "
+                             "each partition separately (or drop it on purpose with strip_regex).", line))
         if t.startswith("cluster"):
             findings.append((BLOCK, no, "cluster", "Cluster config; target design is an HA pair.", line))
     if ssl_dir is not None:
@@ -373,6 +374,12 @@ def stat_snapshot(n):
     return out
 
 
+def safe_target(base, rel):
+    """base/rel resolved, or None if a name from the config (e.g. ../../x) would leave base."""
+    t = (Path(base) / rel).resolve()
+    return t if t.is_relative_to(Path(base).resolve()) else None
+
+
 def write_private(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -399,8 +406,9 @@ def export_one(host, user, pw, a):
         saved = text_of(n.get("config/nssavedconfig"))
         if not running:
             raise RuntimeError("nsrunningconfig returned no text (check the account's command policy)")
-        (d / "ns.conf").write_text(running, encoding="utf-8")
-        (d / "saved.conf").write_text(saved, encoding="utf-8")
+        # ns.conf holds password hashes and encrypted secrets: owner-only, like the keys
+        write_private(d / "ns.conf", running.encode("utf-8"))
+        write_private(d / "saved.conf", saved.encode("utf-8"))
         meta["running_differs_from_saved"] = bool(saved) and running.strip() != saved.strip()
         meta["stats"] = stat_snapshot(n)
         lines = running.splitlines()
@@ -419,7 +427,10 @@ def export_one(host, user, pw, a):
             if not r.get("filecontent"):
                 meta["ssl_missing"].append(f); continue
             data = base64.b64decode(r["filecontent"])
-            target = d / "ssl" / (rel if not f.startswith("/") else rel.name)
+            target = safe_target(d / "ssl", rel if not f.startswith("/") else Path(rel.name))
+            if target is None:
+                print(f"  SKIPPED {f}: path leaves the output folder", file=sys.stderr)
+                meta["ssl_missing"].append(f); continue
             if kind == "key":
                 write_private(target, data)
             else:

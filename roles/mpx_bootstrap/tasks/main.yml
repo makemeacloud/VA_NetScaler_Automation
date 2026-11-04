@@ -58,7 +58,8 @@
         status_code: [200, 201, -1]
         timeout: 30
       when: mpx_bootstrap_presave is succeeded and mpx_bootstrap_presave is not skipped
-      ignore_errors: true   # the connection usually drops while the box goes down
+      register: mpx_bootstrap_reboot
+      failed_when: false   # the connection usually drops while the box goes down; the next task checks it went down
       no_log: true
 
     - name: Wait for the bootstrap IP to stop answering (reboot started)

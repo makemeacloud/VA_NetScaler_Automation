@@ -16,14 +16,6 @@
   check_mode: false
   no_log: true
 
-- name: Not left locked STAYPRIMARY/STAYSECONDARY
-  ansible.builtin.assert:
-    that: >-
-      ((mpx_ha_pair_state.json.hanode | default([]) | selectattr('id', 'in', ['0', 0]) | first).hastatus | default('ENABLED')
-      | upper) not in ['STAYPRIMARY', 'STAYSECONDARY'] or not (mpx_ha_release_lock | default(true) | bool)
-    fail_msg: "{{ inventory_hostname }} is still locked; failover will not work. Re-run the ha tag or set hastatus ENABLED by hand."
-  when: not ansible_check_mode
-
 - name: Already paired with the right peer?
   ansible.builtin.set_fact:
     mpx_ha_pair_already: "{{ hostvars[ha_peer].ansible_host in (mpx_ha_pair_before.json.hanode | default([]) | map(attribute='ipaddress') | list) }}"
